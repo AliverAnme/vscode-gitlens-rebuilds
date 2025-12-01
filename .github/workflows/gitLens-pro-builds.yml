@@ -192,31 +192,26 @@ jobs:
                         pattern="$match_pattern"
                         echo "Applying pattern-based patch for: $pattern"
 
-                        # 使用awk进行多行匹配和替换
-                        # 将匹配模式和替换内容写入临时文件
-                        echo "$pattern" > match_pattern.tmp
-                        echo "$patch_content" > patch_content.tmp
+                        # 将匹配模式与替换内容中的转义序列(\n, \t 等)展开为实际换行/制表符
+                        printf "%b" "$pattern" > match_pattern.tmp
+                        printf "%b" "$patch_content" > patch_content.tmp
 
-                        # 使用awk进行多行替换
-                        awk '{
-                          # 读取整个文件到buffer
-                          buffer = buffer $0 "\n"
-                        } END {
-                          # 读取匹配模式和替换内容
-                          getline pattern_str < "match_pattern.tmp"
-                          getline patch < "patch_content.tmp"
-                          # 读取剩余的替换内容（处理多行）
-                          while (getline line < "patch_content.tmp") {
-                            patch = patch "\n" line
-                          }
-                          # 替换匹配的内容
-                          gsub(pattern_str, patch, buffer)
-                          # 输出结果
-                          print buffer
-                        }' "$file_path" > "$file_path.tmp"
+                        # 使用 Python 做字面多行替换（更可靠，保留原文件编码）
+                        python3 - <<'PY' "$file_path"
+import sys
+from pathlib import Path
 
-                        # 替换原文件
-                        mv "$file_path.tmp" "$file_path"
+file_path = Path(sys.argv[1])
+pattern = Path('match_pattern.tmp').read_text(encoding='utf-8')
+patch = Path('patch_content.tmp').read_text(encoding='utf-8')
+content = file_path.read_text(encoding='utf-8')
+if pattern in content:
+    content = content.replace(pattern, patch)
+    file_path.write_text(content, encoding='utf-8')
+else:
+    # 如果未找到匹配，仍写回原内容以触发后续验证失败
+    file_path.write_text(content, encoding='utf-8')
+PY
                         ;;
                       *)
                         echo "❌ ERROR: Unknown match type: $match_type"
