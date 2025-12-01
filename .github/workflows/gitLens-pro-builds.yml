@@ -200,58 +200,51 @@ jobs:
 
                         # 添加调试信息：显示替换前文件中所有匹配函数的位置
                         echo "Before removal - all occurrences of $function_name:"
-                        grep -n "export function $function_name\|function $function_name" "$file_path"
+                        # 修复正则表达式：正确转义括号
+                        grep -n "export function $function_name\s*\(|^function $function_name\s*\(" "$file_path" || echo "No occurrences found"
 
-                        # 采用精确的函数匹配和修改策略
-                        # 1. 查找目标函数定义
-                        echo "Finding target function definition for $function_name..."
-                        # 只查找第一个匹配的函数定义
-                        func_line=$(grep -n "^export function $function_name\s*\(|^function $function_name\s*\(" "$file_path" | head -1 | cut -d: -f1)
+                        # 采用更可靠的函数替换策略：先清理重复定义，再添加新函数
+                        echo "=== Cleaning up duplicate function definitions for $function_name ==="
 
-                        if [ -n "$func_line" ]; then
-                          echo "Found function at line $func_line, will modify it..."
-
-                          # 2. 使用awk精确替换目标函数，保留其他内容
-                          awk -v func="$function_name" -v new_func="$patch_content" '
-                          BEGIN {
-                            in_target_func = 0;
-                            brace_count = 0;
-                            found = 0;
-                          }
-                          {
-                            if (!in_target_func) {
-                              # 精确匹配目标函数定义
-                              if ($0 ~ "^export function " func "\s*\(|^function " func "\s*\(") {
-                                in_target_func = 1;
-                                found = 1;
-                                # 输出新的函数内容
-                                printf "%s\n", new_func;
-                                # 计算当前行的大括号数量
-                                brace_count = gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
-                              } else {
-                                # 不是目标函数，正常输出
-                                print;
-                              }
-                            } else {
-                              # 在目标函数内部，计算大括号数量
-                              brace_count += gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
-                              # 当大括号数量为0时，函数结束
-                              if (brace_count <= 0) {
-                                in_target_func = 0;
-                              }
-                              # 跳过原函数内容
+                        # 1. 先删除所有现有的函数定义
+                        # 使用更可靠的方法：创建临时文件，只保留非目标函数的内容
+                        awk -v func="$function_name" '
+                        BEGIN {
+                          in_func = 0;
+                          brace_count = 0;
+                        }
+                        {
+                          # 检查是否是目标函数的开始
+                          if ($0 ~ "^export function " func "\\s*\\(|^function " func "\\s*\\(") {
+                            in_func = 1;
+                            # 计算当前行的大括号数量
+                            brace_count = gsub(/\\{/, "", $0) - gsub(/\\}/, "", $0);
+                          } else if (in_func) {
+                            # 在目标函数内部，计算大括号数量
+                            brace_count += gsub(/\\{/, "", $0) - gsub(/\\}/, "", $0);
+                            # 当大括号数量为0时，函数结束
+                            if (brace_count <= 0) {
+                              in_func = 0;
                             }
+                          } else {
+                            # 不是目标函数，正常输出
+                            print;
                           }
-                          END {
-                            # 如果函数不存在，添加到文件末尾
-                            if (!found) {
-                              print "\n" new_func;
-                            }
-                          }
-                          ' "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
+                        }
+                        ' "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
+
+                        # 2. 现在添加新的函数到文件末尾
+                        echo "Adding new $function_name function..."
+                        echo -e "\n$patch_content" >> "$file_path"
+
+                        # 3. 验证函数定义数量
+                        echo "Verifying function definition count..."
+                        func_count=$(grep -c "^export function $function_name\\s*\\(|^function $function_name\\s*\\(" "$file_path")
+                        if [ "$func_count" -ne 1 ]; then
+                          echo "❌ ERROR: Found $func_count definitions of $function_name, expected 1"
+                          exit 1
                         else
-                          echo "Function $function_name not found, adding to file..."
-                          echo -e "\n$patch_content" >> "$file_path"
+                          echo "✅ SUCCESS: Only 1 definition of $function_name found"
                         fi
 
                         # 添加调试信息：显示替换后文件中是否还有匹配函数
