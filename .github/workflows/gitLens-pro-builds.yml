@@ -1,411 +1,1184 @@
 name: GitLens PRO Automated Build & Release
 
 on:
-  # 手动触发
-  workflow_dispatch:
-    inputs:
-      upstream_branch:
-        description: '上游仓库分支'
-        required: true
-        default: 'main'
-      release_version:
-        description: '发布版本号（可选）'
-        required: false
-  # 定时触发（每天凌晨2点）
-  schedule:
-    - cron: '0 2 * * *'
-  # 上游仓库触发（需要在上游仓库配置webhook）
-  repository_dispatch:
-    types: [upstream-update]
+    # 手动触发
+    workflow_dispatch:
+        inputs:
+            upstream_branch:
+                description: '上游仓库分支'
+                required: true
+                default: 'main'
+            release_version:
+                description: '发布版本号（可选）'
+                required: false
+    # 定时触发（每天凌晨2点）
+    schedule:
+        - cron: '0 2 * * *'
+    # 上游仓库触发（需要在上游仓库配置webhook）
+    repository_dispatch:
+        types: [upstream-update]
 
 permissions:
-  contents: write
-  packages: write
-  issues: read
-  pull-requests: read
+    contents: write
+    packages: write
+    issues: read
+    pull-requests: read
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 60
+    build-and-release:
+        runs-on: ubuntu-latest
+        environment: production
+        timeout-minutes: 60
 
-    steps:
-      # 1. 环境准备
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+        steps:
+            # 1. 环境准备
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22.x'
-          cache: 'pnpm'
-          cache-dependency-path: '**/pnpm-lock.yaml'
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: latest
+                  run_install: false
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
-          run_install: false
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '22.x'
+                  cache: 'pnpm'
+                  cache-dependency-path: '**/pnpm-lock.yaml'
 
-      - name: Install dependencies
-        run: pnpm install
+            - name: Install dependencies
+              run: pnpm install
 
-      # 2. 版本号检查机制
-      - name: Get current project version
-        id: get-current-version
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "Current project version: $CURRENT_VERSION"
+            # 2. 版本号检查机制
+            - name: Get current project version
+              id: get-current-version
+              run: |
+                  CURRENT_VERSION=$(node -p "require('./package.json').version")
+                  echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+                  echo "Current project version: $CURRENT_VERSION"
 
-      - name: Get latest release version
-        id: get-latest-release
-        run: |
-          # 获取最新Release版本号，如果没有Release则返回空
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // empty')
-          # 移除可能的"v"前缀，统一格式
-          LATEST_VERSION=$(echo "$LATEST_RELEASE" | sed 's/^v//')
-          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-          echo "Latest release version: $LATEST_VERSION"
+            - name: Get latest release version
+              id: get-latest-release
+              run: |
+                  # 获取最新Release版本号，如果没有Release则返回空
+                  LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // empty')
+                  # 移除可能的"v"前缀，统一格式
+                  LATEST_VERSION=$(echo "$LATEST_RELEASE" | sed 's/^v//')
+                  echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+                  echo "Latest release version: $LATEST_VERSION"
 
-      - name: Compare versions
-        id: compare-versions
-        run: |
-          CURRENT_VERSION=${{ steps.get-current-version.outputs.current_version }}
-          LATEST_VERSION=${{ steps.get-latest-release.outputs.latest_version }}
+            - name: Compare versions
+              id: compare-versions
+              run: |
+                  CURRENT_VERSION=${{ steps.get-current-version.outputs.current_version }}
+                  LATEST_VERSION=${{ steps.get-latest-release.outputs.latest_version }}
 
-          echo "=== Version Comparison ==="
-          echo "Current project version: $CURRENT_VERSION"
-          echo "Latest release version: $LATEST_VERSION"
+                  echo "=== Version Comparison ==="
+                  echo "Current project version: $CURRENT_VERSION"
+                  echo "Latest release version: $LATEST_VERSION"
 
-          # 检查是否有最新Release
-          if [ -z "$LATEST_VERSION" ]; then
-            echo "No existing releases found. Proceeding with build."
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-            echo "decision=proceed" >> $GITHUB_OUTPUT
-            echo "reason=No existing releases found"
-            exit 0
-          fi
+                  # 检查是否有最新Release
+                  if [ -z "$LATEST_VERSION" ]; then
+                    echo "No existing releases found. Proceeding with build."
+                    echo "version_changed=true" >> $GITHUB_OUTPUT
+                    echo "decision=proceed" >> $GITHUB_OUTPUT
+                    echo "reason=No existing releases found"
+                    exit 0
+                  fi
 
-          # 精确比对版本号
-          if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
-            echo "Version match found. No changes detected."
-            echo "version_changed=false" >> $GITHUB_OUTPUT
-            echo "decision=stop" >> $GITHUB_OUTPUT
-            echo "reason=Version $CURRENT_VERSION already released"
-          else
-            echo "Version mismatch found. New version detected."
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-            echo "decision=proceed" >> $GITHUB_OUTPUT
-            echo "reason=New version $CURRENT_VERSION detected (latest: $LATEST_VERSION)"
-          fi
+                  # 精确比对版本号
+                  if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+                    echo "Version match found. No changes detected."
+                    echo "version_changed=false" >> $GITHUB_OUTPUT
+                    echo "decision=stop" >> $GITHUB_OUTPUT
+                    echo "reason=Version $CURRENT_VERSION already released"
+                  else
+                    echo "Version mismatch found. New version detected."
+                    echo "version_changed=true" >> $GITHUB_OUTPUT
+                    echo "decision=proceed" >> $GITHUB_OUTPUT
+                    echo "reason=New version $CURRENT_VERSION detected (latest: $LATEST_VERSION)"
+                  fi
 
-      - name: Stop workflow if version unchanged
-        if: steps.compare-versions.outputs.decision == 'stop'
-        run: |
-          echo "::error::Workflow stopped because version ${{ steps.get-current-version.outputs.current_version }} is already released."
-          echo "::notice::Use a different version number or delete the existing release to proceed."
-          exit 1
+            - name: Stop workflow if version unchanged
+              if: steps.compare-versions.outputs.decision == 'stop'
+              run: |
+                  echo "::error::Workflow stopped because version ${{ steps.get-current-version.outputs.current_version }} is already released."
+                  echo "::notice::Use a different version number or delete the existing release to proceed."
+                  exit 1
 
-      # 3. 代码同步
-      - name: Add upstream remote
-        run: git remote add upstream https://github.com/gitkraken/vscode-gitlens.git
+            # 3. 代码同步
+            - name: Add upstream remote
+              run: git remote add upstream https://github.com/gitkraken/vscode-gitlens.git
 
-      - name: Fetch upstream changes
-        run: git fetch upstream --all --tags
+            - name: Fetch upstream changes
+              run: git fetch upstream --all --tags
 
-      - name: Merge upstream changes
-        run: |
-          git checkout ${{ github.ref_name }}
-          git merge upstream/${{ github.event.inputs.upstream_branch || 'main' }} --allow-unrelated-histories -m "Merge upstream changes"
+            - name: Merge upstream changes
+              run: |
+                  git checkout ${{ github.ref_name }}
+                  git merge upstream/${{ github.event.inputs.upstream_branch || 'main' }} --allow-unrelated-histories -m "Merge upstream changes"
 
-      # 4. 代码修改 - 解锁PRO功能
-      - name: Initialize patch report
-        id: patch-report-init
-        run: |
-          # 创建补丁报告文件
-          echo '{"patches":[]}' > patch-report.json
-          echo "Patch report initialized"
+            # 4. 代码修改 - 解锁PRO功能
+            - name: Initialize patch report
+              id: patch-report-init
+              run: |
+                  # 创建补丁报告文件
+                  echo '{"patches":[]}' > patch-report.json
+                  echo "Patch report initialized"
 
-      - name: Apply structured patches for PRO feature unlocking
-        id: apply-patches
-        run: |
-          # 定义补丁列表 - 不依赖行号，使用函数名和唯一模式
-          declare -a patches=(
-            # patch-001: 修改computeSubscriptionState函数，将所有订阅视为付费订阅
-            "patch-001:subscription.utils.computeSubscriptionState:src/plus/gk/utils/subscription.utils.ts:function:computeSubscriptionState:export function computeSubscriptionState(subscription: Optional<Subscription, 'state'>): SubscriptionState {\n\treturn SubscriptionState.Paid; // 所有订阅均视为付费订阅，强制返回Paid状态\n}"
+            - name: Apply structured patches for PRO feature unlocking
+              id: apply-patches
+              run: |
+                  # 定义补丁列表 - 不依赖行号，使用函数名和唯一模式
+                  declare -a patches=(
+                    # patch-001: 修改computeSubscriptionState函数，将所有订阅视为付费订阅
+                    "patch-001:subscription.utils.computeSubscriptionState:src/plus/gk/utils/subscription.utils.ts:function:computeSubscriptionState:export function computeSubscriptionState(subscription: Optional<Subscription, 'state'>): SubscriptionState {\n\treturn SubscriptionState.Paid; // 所有订阅均视为付费订阅，强制返回Paid状态\n}"
 
-            # patch-002: 修改getSubscriptionNextPaidPlanId函数，始终返回enterprise
-            "patch-002:subscription.utils.getSubscriptionNextPaidPlanId:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionNextPaidPlanId:export function getSubscriptionNextPaidPlanId(subscription: Optional<Subscription, 'state'>): PaidSubscriptionPlanIds {\n\treturn 'enterprise'; // 始终返回enterprise\n}"
+                    # patch-002: 修改getSubscriptionNextPaidPlanId函数，始终返回enterprise
+                    "patch-002:subscription.utils.getSubscriptionNextPaidPlanId:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionNextPaidPlanId:export function getSubscriptionNextPaidPlanId(subscription: Optional<Subscription, 'state'>): PaidSubscriptionPlanIds {\n\treturn 'enterprise'; // 始终返回enterprise\n}"
 
-            # patch-003: 修改getSubscriptionPlan函数，始终返回enterprise计划
-            "patch-003:subscription.utils.getSubscriptionPlan:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionPlan:export function getSubscriptionPlan(\n\tid: SubscriptionPlanIds,\n\tbundle: boolean,\n\ttrialReactivationCount: number,\n\torganizationId: string | undefined,\n\tstartedOn?: Date,\n\texpiresOn?: Date,\n\tcancelled: boolean = false,\n\tnextTrialOptInDate?: string,\n): SubscriptionPlan {\n\treturn {\n\t\tid: 'enterprise', // 始终返回enterprise\n\t\tname: getSubscriptionProductPlanName('enterprise'),\n\t\tbundle: bundle,\n\t\tcancelled: cancelled,\n\t\torganizationId: organizationId,\n\t\ttrialReactivationCount: trialReactivationCount,\n\t\tnextTrialOptInDate: nextTrialOptInDate,\n\t\tstartedOn: (startedOn ?? new Date()).toISOString(),\n\t\texpiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,\n\t};\n}"
+                    # patch-003: 修改getSubscriptionPlan函数，始终返回enterprise计划
+                    "patch-003:subscription.utils.getSubscriptionPlan:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionPlan:export function getSubscriptionPlan(\n\tid: SubscriptionPlanIds,\n\tbundle: boolean,\n\ttrialReactivationCount: number,\n\torganizationId: string | undefined,\n\tstartedOn?: Date,\n\texpiresOn?: Date,\n\tcancelled: boolean = false,\n\tnextTrialOptInDate?: string,\n): SubscriptionPlan {\n\treturn {\n\t\tid: 'enterprise', // 始终返回enterprise\n\t\tname: getSubscriptionProductPlanName('enterprise'),\n\t\tbundle: bundle,\n\t\tcancelled: cancelled,\n\t\torganizationId: organizationId,\n\t\ttrialReactivationCount: trialReactivationCount,\n\t\tnextTrialOptInDate: nextTrialOptInDate,\n\t\tstartedOn: (startedOn ?? new Date()).toISOString(),\n\t\texpiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,\n\t};\n}"
 
-            # patch-004: 修改getSubscriptionPlanName函数，始终返回Enterprise
-            "patch-004:subscription.utils.getSubscriptionPlanName:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionPlanName:/** Gets the plan name for the given plan id */\nexport function getSubscriptionPlanName(\n\tid: SubscriptionPlanIds,\n): 'Community' | 'Student' | 'Pro' | 'Advanced' | 'Business' | 'Enterprise' {\n\treturn 'Enterprise'; // 始终返回Enterprise\n}"
+                    # patch-004: 修改getSubscriptionPlanName函数，始终返回Enterprise
+                    "patch-004:subscription.utils.getSubscriptionPlanName:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionPlanName:/** Gets the plan name for the given plan id */\nexport function getSubscriptionPlanName(\n\tid: SubscriptionPlanIds,\n): 'Community' | 'Student' | 'Pro' | 'Advanced' | 'Business' | 'Enterprise' {\n\treturn 'Enterprise'; // 始终返回Enterprise\n}"
 
-            # patch-005: 修改getSubscriptionPlanType函数，始终返回ENTERPRISE
-            "patch-005:subscription.utils.getSubscriptionPlanType:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionPlanType:/** Only for gk.dev `planType` query param */\nexport function getSubscriptionPlanType(\n\tid: SubscriptionPlanIds,\n): 'STUDENT' | 'PRO' | 'ADVANCED' | 'BUSINESS' | 'ENTERPRISE' {\n\treturn 'ENTERPRISE'; // 始终返回ENTERPRISE\n}"
+                    # patch-005: 修改getSubscriptionPlanType函数，始终返回ENTERPRISE
+                    "patch-005:subscription.utils.getSubscriptionPlanType:src/plus/gk/utils/subscription.utils.ts:function:getSubscriptionPlanType:/** Only for gk.dev `planType` query param */\nexport function getSubscriptionPlanType(\n\tid: SubscriptionPlanIds,\n): 'STUDENT' | 'PRO' | 'ADVANCED' | 'BUSINESS' | 'ENTERPRISE' {\n\treturn 'ENTERPRISE'; // 始终返回ENTERPRISE\n}"
 
-            # patch-006: 修改isSubscriptionPaid函数，所有计划均视为付费计划
-            "patch-006:subscription.utils.isSubscriptionPaid:src/plus/gk/utils/subscription.utils.ts:function:isSubscriptionPaid:export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>): boolean {\n\treturn true; // 所有计划均视为付费计划，允许访问所有PRO级别功能\n}"
+                    # patch-006: 修改isSubscriptionPaid函数，所有计划均视为付费计划
+                    "patch-006:subscription.utils.isSubscriptionPaid:src/plus/gk/utils/subscription.utils.ts:function:isSubscriptionPaid:export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>): boolean {\n\treturn true; // 所有计划均视为付费计划，允许访问所有PRO级别功能\n}"
 
-            # patch-007: 修改isSubscriptionPaidPlan函数，所有计划均视为付费计划
-            "patch-007:subscription.utils.isSubscriptionPaidPlan:src/plus/gk/utils/subscription.utils.ts:function:isSubscriptionPaidPlan:export function isSubscriptionPaidPlan(id: SubscriptionPlanIds): id is PaidSubscriptionPlanIds {\n\treturn true; // 所有计划均视为付费计划，允许访问所有PRO级别功能\n}"
+                    # patch-007: 修改isSubscriptionPaidPlan函数，所有计划均视为付费计划
+                    "patch-007:subscription.utils.isSubscriptionPaidPlan:src/plus/gk/utils/subscription.utils.ts:function:isSubscriptionPaidPlan:export function isSubscriptionPaidPlan(id: SubscriptionPlanIds): id is PaidSubscriptionPlanIds {\n\treturn true; // 所有计划均视为付费计划，允许访问所有PRO级别功能\n}"
 
-            # patch-008: 修改convertLicenseTypeToPlanId函数，始终返回enterprise
-            "patch-008:checkin.utils.convertLicenseTypeToPlanId:src/plus/gk/utils/checkin.utils.ts:function:convertLicenseTypeToPlanId:function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {\n\treturn 'enterprise'; // 始终返回enterprise\n}"
+                    # patch-008: 修改convertLicenseTypeToPlanId函数，始终返回enterprise
+                    "patch-008:checkin.utils.convertLicenseTypeToPlanId:src/plus/gk/utils/checkin.utils.ts:function:convertLicenseTypeToPlanId:function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {\n\treturn 'enterprise'; // 始终返回enterprise\n}"
 
-            # patch-009: 修改subscriptionService.changeSubscription中的状态计算逻辑，确保订阅计划始终为enterprise
-            "patch-009:subscriptionService.changeSubscription:src/plus/gk/subscriptionService.ts:pattern:subscription.state = computeSubscriptionState:subscription.state = computeSubscriptionState(subscription);\n\t\t\t// 确保订阅计划始终为enterprise类型\n\t\t\tsubscription.plan.actual.id = 'enterprise';\n\t\t\tsubscription.plan.effective.id = 'enterprise';\n\t\t\tsubscription.plan.actual.name = 'GitLens Enterprise';\n\t\t\tsubscription.plan.effective.name = 'GitLens Enterprise';\n\t\t\tassertSubscriptionState(subscription);"
-          )
+                    # patch-009: 修改subscriptionService.changeSubscription中的状态计算逻辑，确保订阅计划始终为enterprise
+                    "patch-009:subscriptionService.changeSubscription:src/plus/gk/subscriptionService.ts:pattern:subscription.state = computeSubscriptionState;\n\t\t\tassertSubscriptionState:subscription.state = computeSubscriptionState(subscription);\n\t\t\t// 确保订阅计划始终为enterprise类型\n\t\t\tsubscription.plan.actual.id = 'enterprise';\n\t\t\tsubscription.plan.effective.id = 'enterprise';\n\t\t\tsubscription.plan.actual.name = 'GitLens Enterprise';\n\t\t\tsubscription.plan.effective.name = 'GitLens Enterprise';\n\t\t\tassertSubscriptionState(subscription);"
+                  )
 
-          # 初始化补丁结果统计
-          total_patches=${#patches[@]}
-          successful_patches=0
-          failed_patches=0
+                  # 初始化补丁结果统计
+                  total_patches=${#patches[@]}
+                  successful_patches=0
+                  failed_patches=0
 
-          # 应用每个补丁
-          for patch in "${patches[@]}"; do
-            IFS=":" read -r patch_id patch_name file_path match_type match_pattern patch_content <<< "$patch"
+                  # 应用每个补丁
+                  for patch in "${patches[@]}"; do
+                    IFS=":" read -r patch_id patch_name file_path match_type match_pattern patch_content <<< "$patch"
 
-            echo "\n=== Processing Patch: $patch_id - $patch_name ==="
-            echo "File: $file_path"
-            echo "Match Type: $match_type"
-            echo "Match Pattern: $match_pattern"
+                    echo "\n=== Processing Patch: $patch_id - $patch_name ==="
+                    echo "File: $file_path"
+                    echo "Match Type: $match_type"
+                    echo "Match Pattern: $match_pattern"
 
-            # 检查文件是否存在
-            if [ ! -f "$file_path" ]; then
-              echo "❌ ERROR: File $file_path not found"
-              failed_patches=$((failed_patches+1))
-              # 更新补丁报告
-              jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "File not found" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
-              continue
-            fi
+                    # 检查文件是否存在
+                    if [ ! -f "$file_path" ]; then
+                      echo "❌ ERROR: File $file_path not found"
+                      failed_patches=$((failed_patches+1))
+                      # 更新补丁报告
+                      jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "File not found" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
+                      continue
+                    fi
 
-            # 应用补丁 - 根据匹配类型使用不同的策略
-            case "$match_type" in
-              "function")
-                # 使用函数名匹配，替换整个函数
-                function_name="$match_pattern"
-                echo "Applying function-based patch for: $function_name"
+                    # 应用补丁 - 根据匹配类型使用不同的策略
+                    case "$match_type" in
+                      "function")
+                        # 使用函数名匹配，替换整个函数
+                        function_name="$match_pattern"
+                        echo "Applying function-based patch for: $function_name"
 
-                # 使用sed替换整个函数 - 匹配函数定义到下一个函数定义或文件结束
-                sed -i "/^export function $function_name\|^function $function_name/,/^export function \|^function \|^}/c\\$patch_content" "$file_path"
-                ;;
-              "pattern")
-                # 使用唯一模式匹配，替换特定代码段
-                pattern="$match_pattern"
-                echo "Applying pattern-based patch for: $pattern"
+                        # 使用sed替换整个函数 - 匹配函数定义到下一个函数定义或文件结束
+                        sed -i "/^export function $function_name\|^function $function_name/,/^export function \|^function \|^}/c\\$patch_content" "$file_path"
+                        ;;
+                      "pattern")
+                        # 使用唯一模式匹配，替换特定代码段
+                        pattern="$match_pattern"
+                        echo "Applying pattern-based patch for: $pattern"
 
-                # 使用sed替换匹配的代码段
-                # 转义特殊字符
-                escaped_pattern=$(echo "$pattern" | sed 's/[\/&]/\\&/g')
-                escaped_content=$(echo "$patch_content" | sed 's/[\/&]/\\&/g')
-                sed -i "s/$escaped_pattern/$escaped_content/g" "$file_path"
-                ;;
-              *)
-                echo "❌ ERROR: Unknown match type: $match_type"
-                failed_patches=$((failed_patches+1))
-                jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Unknown match type" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
-                continue
-                ;;
-            esac
+                        # 使用sed替换匹配的代码段
+                        # 转义特殊字符
+                        escaped_pattern=$(echo "$pattern" | sed 's/[\/&]/\\&/g')
+                        escaped_content=$(echo "$patch_content" | sed 's/[\/&]/\\&/g')
+                        sed -i "s/$escaped_pattern/$escaped_content/g" "$file_path"
+                        ;;
+                      *)
+                        echo "❌ ERROR: Unknown match type: $match_type"
+                        failed_patches=$((failed_patches+1))
+                        jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Unknown match type" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
+                        continue
+                        ;;
+                    esac
 
-            # 验证补丁是否成功应用 - 检查关键注释或代码模式
-            if grep -q "// 所有订阅均视为付费订阅" "$file_path" || grep -q "// 始终返回enterprise" "$file_path" || grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
-              echo "✅ SUCCESS: Patch $patch_id applied successfully"
-              successful_patches=$((successful_patches+1))
-              jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "success" --arg result "Patch applied successfully" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
-            else
-              echo "❌ ERROR: Patch $patch_id verification failed"
-              failed_patches=$((failed_patches+1))
-              jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Verification failed" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
-            fi
-          done
+                    # 验证补丁是否成功应用 - 检查关键注释或代码模式
+                    if grep -q "// 所有订阅均视为付费订阅" "$file_path" || grep -q "// 始终返回enterprise" "$file_path" || grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
+                      echo "✅ SUCCESS: Patch $patch_id applied successfully"
+                      successful_patches=$((successful_patches+1))
+                      jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "success" --arg result "Patch applied successfully" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
+                    else
+                      echo "❌ ERROR: Patch $patch_id verification failed"
+                      failed_patches=$((failed_patches+1))
+                      jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Verification failed" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
+                    fi
+                  done
 
-          # 生成最终报告
-          echo "\n=== Patch Application Summary ==="
-          echo "Total patches: $total_patches"
-          echo "Successful: $successful_patches"
-          echo "Failed: $failed_patches"
+                  # 生成最终报告
+                  echo "\n=== Patch Application Summary ==="
+                  echo "Total patches: $total_patches"
+                  echo "Successful: $successful_patches"
+                  echo "Failed: $failed_patches"
 
-          # 更新补丁报告的摘要信息
-          jq --arg total "$total_patches" --arg successful "$successful_patches" --arg failed "$failed_patches" '.summary = {"total":$total,"successful":$successful,"failed":$failed}' patch-report.json > temp.json && mv temp.json patch-report.json
+                  # 更新补丁报告的摘要信息
+                  jq --arg total "$total_patches" --arg successful "$successful_patches" --arg failed "$failed_patches" '.summary = {"total":$total,"successful":$successful,"failed":$failed}' patch-report.json > temp.json && mv temp.json patch-report.json
 
-          # 显示最终报告
-          echo "\n=== Final Patch Report ==="
-          cat patch-report.json | jq .
+                  # 显示最终报告
+                  echo "\n=== Final Patch Report ==="
+                  cat patch-report.json | jq .
 
-          # 设置输出变量
-          echo "total_patches=$total_patches" >> $GITHUB_OUTPUT
-          echo "successful_patches=$successful_patches" >> $GITHUB_OUTPUT
-          echo "failed_patches=$failed_patches" >> $GITHUB_OUTPUT
+                  # 设置输出变量
+                  echo "total_patches=$total_patches" >> $GITHUB_OUTPUT
+                  echo "successful_patches=$successful_patches" >> $GITHUB_OUTPUT
+                  echo "failed_patches=$failed_patches" >> $GITHUB_OUTPUT
 
-      - name: Verify patch application results
-        id: verify-patches
-        run: |
-          # 检查补丁应用结果
-          successful_patches=${{ steps.apply-patches.outputs.successful_patches }}
-          total_patches=${{ steps.apply-patches.outputs.total_patches }}
+            - name: Verify patch application results
+              id: verify-patches
+              run: |
+                  # 检查补丁应用结果
+                  successful_patches=${{ steps.apply-patches.outputs.successful_patches }}
+                  total_patches=${{ steps.apply-patches.outputs.total_patches }}
 
-          if [ "$successful_patches" -eq "$total_patches" ]; then
-            echo "✅ All patches applied successfully!"
-            echo "verification_result=success" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Some patches failed to apply. Please check the patch report."
-            echo "verification_result=failure" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+                  if [ "$successful_patches" -eq "$total_patches" ]; then
+                    echo "✅ All patches applied successfully!"
+                    echo "verification_result=success" >> $GITHUB_OUTPUT
+                  else
+                    echo "❌ Some patches failed to apply. Please check the patch report."
+                    echo "verification_result=failure" >> $GITHUB_OUTPUT
+                    exit 1
+                  fi
 
-      - name: Generate patch processing report
-        id: generate-report
-        run: |
-          # 生成人类可读的补丁报告
-          echo "# GitLens PRO Patch Processing Report" > patch-report.md
-          echo "" >> patch-report.md
-          echo "## Summary" >> patch-report.md
-          echo "- Total patches: ${{ steps.apply-patches.outputs.total_patches }}" >> patch-report.md
-          echo "- Successful: ${{ steps.apply-patches.outputs.successful_patches }}" >> patch-report.md
-          echo "- Failed: ${{ steps.apply-patches.outputs.failed_patches }}" >> patch-report.md
-          echo "" >> patch-report.md
+            - name: Generate patch processing report
+              id: generate-report
+              run: |
+                  # 生成人类可读的补丁报告
+                  echo "# GitLens PRO Patch Processing Report" > patch-report.md
+                  echo "" >> patch-report.md
+                  echo "## Summary" >> patch-report.md
+                  echo "- Total patches: ${{ steps.apply-patches.outputs.total_patches }}" >> patch-report.md
+                  echo "- Successful: ${{ steps.apply-patches.outputs.successful_patches }}" >> patch-report.md
+                  echo "- Failed: ${{ steps.apply-patches.outputs.failed_patches }}" >> patch-report.md
+                  echo "" >> patch-report.md
 
-          echo "## Patch Details" >> patch-report.md
-          echo "" >> patch-report.md
+                  echo "## Patch Details" >> patch-report.md
+                  echo "" >> patch-report.md
 
-          # 从JSON报告中提取补丁详情
-          jq -r '.patches[] | "### Patch \(.id) - \(.name)\n- File: \(.file)\n- Match Type: \(.match_type)\n- Match Pattern: \(.match_pattern)\n- Status: **\(.status | ascii_upcase)**\n- Result: \(.result)\n"' patch-report.json >> patch-report.md
+                  # 从JSON报告中提取补丁详情
+                  jq -r '.patches[] | "### Patch \(.id) - \(.name)\n- File: \(.file)\n- Match Type: \(.match_type)\n- Match Pattern: \(.match_pattern)\n- Status: **\(.status | ascii_upcase)**\n- Result: \(.result)\n"' patch-report.json >> patch-report.md
 
-          echo "" >> patch-report.md
-          echo "## Conclusion" >> patch-report.md
-          if [ "${{ steps.apply-patches.outputs.successful_patches }}" -eq "${{ steps.apply-patches.outputs.total_patches }}" ]; then
-            echo "✅ All PRO feature unlocking patches applied successfully!" >> patch-report.md
-            echo "GitLens PRO features have been fully unlocked." >> patch-report.md
-          else
-            echo "❌ Some patches failed to apply. Please review the details above." >> patch-report.md
-          fi
+                  echo "" >> patch-report.md
+                  echo "## Conclusion" >> patch-report.md
+                  if [ "${{ steps.apply-patches.outputs.successful_patches }}" -eq "${{ steps.apply-patches.outputs.total_patches }}" ]; then
+                    echo "✅ All PRO feature unlocking patches applied successfully!" >> patch-report.md
+                    echo "GitLens PRO features have been fully unlocked." >> patch-report.md
+                  else
+                    echo "❌ Some patches failed to apply. Please review the details above." >> patch-report.md
+                  fi
 
-          echo "\n=== Patch Report Generated ==="
-          cat patch-report.md
+                  echo "\n=== Patch Report Generated ==="
+                  cat patch-report.md
 
-      - name: Display patch report summary
-        run: |
-          echo "\n=== GitLens PRO Patch Processing Summary ==="
-          echo "Total patches: ${{ steps.apply-patches.outputs.total_patches }}"
-          echo "Successful: ${{ steps.apply-patches.outputs.successful_patches }}"
-          echo "Failed: ${{ steps.apply-patches.outputs.failed_patches }}"
-          echo "Verification result: ${{ steps.verify-patches.outputs.verification_result }}"
-          echo ""
-          echo "Detailed report available in patch-report.md and patch-report.json"
+            - name: Display patch report summary
+              run: |
+                  echo "\n=== GitLens PRO Patch Processing Summary ==="
+                  echo "Total patches: ${{ steps.apply-patches.outputs.total_patches }}"
+                  echo "Successful: ${{ steps.apply-patches.outputs.successful_patches }}"
+                  echo "Failed: ${{ steps.apply-patches.outputs.failed_patches }}"
+                  echo "Verification result: ${{ steps.verify-patches.outputs.verification_result }}"
+                  echo ""
+                  echo "Detailed report available in patch-report.md and patch-report.json"
 
-      # 5. 代码推送（仅在有实际修改时执行）
-      - name: Configure git user
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+            # 5. 代码推送（仅在有实际修改时执行）
+            - name: Configure git user
+              run: |
+                  git config user.name "GitHub Actions"
+                  git config user.email "actions@github.com"
 
-      - name: Check for changes
-        id: check-changes
-        run: |
-          if git diff --exit-code; then
-            echo "no_changes=true" >> $GITHUB_OUTPUT
-            echo "No changes detected, skipping commit and push"
-          else
-            echo "no_changes=false" >> $GITHUB_OUTPUT
-            echo "Changes detected, will commit and push"
-          fi
+            - name: Check for changes
+              id: check-changes
+              run: |
+                  if git diff --exit-code; then
+                    echo "no_changes=true" >> $GITHUB_OUTPUT
+                    echo "No changes detected, skipping commit and push"
+                  else
+                    echo "no_changes=false" >> $GITHUB_OUTPUT
+                    echo "Changes detected, will commit and push"
+                  fi
 
-      - name: Commit changes
-        if: steps.check-changes.outputs.no_changes == 'false'
-        run: |
-          git add .
-          git commit -m "Unlock all PRO features and set default plan to enterprise"
+            - name: Commit changes
+              if: steps.check-changes.outputs.no_changes == 'false'
+              run: |
+                  git add .
+                  git commit -m "Unlock all PRO features and set default plan to enterprise"
 
-      - name: Push changes
-        if: steps.check-changes.outputs.no_changes == 'false'
-        run: git push origin ${{ github.ref_name }}
+            - name: Push changes
+              if: steps.check-changes.outputs.no_changes == 'false'
+              run: git push origin ${{ github.ref_name }}
 
-      # 6. 构建与发布
-      - name: Build VSIX package
-        run: pnpm run package
+            # 6. 构建与发布
+            - name: Build VSIX package
+              run: pnpm run package
 
-      - name: Get VSIX file path
-        id: get-vsix
-        run: |
-          VSIX_FILE=$(find . -name "*.vsix" -type f | head -1)
-          echo "vsix_file=$VSIX_FILE" >> $GITHUB_OUTPUT
-          echo "vsix_filename=$(basename $VSIX_FILE)" >> $GITHUB_OUTPUT
+            - name: Get VSIX file path
+              id: get-vsix
+              run: |
+                  VSIX_FILE=$(find . -name "*.vsix" -type f | head -1)
+                  echo "vsix_file=$VSIX_FILE" >> $GITHUB_OUTPUT
+                  echo "vsix_filename=$(basename $VSIX_FILE)" >> $GITHUB_OUTPUT
 
-      - name: Get build timestamp
-        id: get-timestamp
-        run: |
-          # 获取当前时间并格式化为YYYY-MM-DD HH:mm:ss
-          BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
-          echo "build_timestamp=$BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
-          echo "Build timestamp: $BUILD_TIMESTAMP"
+            - name: Get build timestamp
+              id: get-timestamp
+              run: |
+                  # 获取当前时间并格式化为YYYY-MM-DD HH:mm:ss
+                  BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
+                  echo "build_timestamp=$BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
+                  echo "Build timestamp: $BUILD_TIMESTAMP"
 
-      - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.get-current-version.outputs.current_version }}
-          release_name: GitLens PRO v${{ steps.get-current-version.outputs.current_version }}
-          body: |
-            ## GitLens PRO 自动化构建发布
+            - name: Create Release
+              id: create-release
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: v${{ steps.get-current-version.outputs.current_version }}
+                  release_name: GitLens PRO v${{ steps.get-current-version.outputs.current_version }}
+                  body: |
+                      ## GitLens PRO 自动化构建发布
 
-            ### 发布信息
-            - 构建编号: ${{ github.run_number }}
-            - 构建时间: ${{ steps.get-timestamp.outputs.build_timestamp }}
-            - 上游分支: ${{ github.event.inputs.upstream_branch || 'main' }}
-            - 版本变更: ${{ steps.get-latest-release.outputs.latest_version }} → ${{ steps.get-current-version.outputs.current_version }}
+                      ### 发布信息
+                      - 构建编号: ${{ github.run_number }}
+                      - 构建时间: ${{ steps.get-timestamp.outputs.build_timestamp }}
+                      - 上游分支: ${{ github.event.inputs.upstream_branch || 'main' }}
+                      - 版本变更: ${{ steps.get-latest-release.outputs.latest_version }} → ${{ steps.get-current-version.outputs.current_version }}
 
-            ### 功能变更
-            - 解锁所有PRO功能
-            - 设置默认订阅计划为enterprise
-            - 同步上游仓库最新代码
+                      ### 功能变更
+                      - 解锁所有PRO功能
+                      - 设置默认订阅计划为enterprise
+                      - 同步上游仓库最新代码
 
-            ### 构建文件
-            - VSIX包: ${{ steps.get-vsix.outputs.vsix_filename }}
-          draft: false
-          prerelease: false
+                      ### 构建文件
+                      - VSIX包: ${{ steps.get-vsix.outputs.vsix_filename }}
+                  draft: false
+                  prerelease: false
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ${{ steps.get-vsix.outputs.vsix_file }}
-          asset_name: ${{ steps.get-vsix.outputs.vsix_filename }}
-          asset_content_type: application/vsix
+            - name: Upload Release Asset
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ steps.create-release.outputs.upload_url }}
+                  asset_path: ${{ steps.get-vsix.outputs.vsix_file }}
+                  asset_name: ${{ steps.get-vsix.outputs.vsix_filename }}
+                  asset_content_type: application/vsix
 
-      # 7. 错误处理与通知
-      - name: Send notification on failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const notificationMessage = `GitLens PRO构建失败: ${context.workflow} #${context.runNumber}`;
-            console.log(notificationMessage);
+            # 7. 错误处理与通知
+            - name: Send notification on failure
+              if: failure()
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const notificationMessage = `GitLens PRO构建失败: ${context.workflow} #${context.runNumber}`;
+                      console.log(notificationMessage);
 
-            // 可以添加Slack、Discord或Email通知
-            // 示例：发送到GitHub Issues
-            // await github.rest.issues.create({
-            //   owner: context.repo.owner,
-            //   repo: context.repo.repo,
-            //   title: notificationMessage,
-            //   body: `构建失败详情: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
-            // });
+                      // 可以添加Slack、Discord或Email通知
+                      // 示例：发送到GitHub Issues
+                      // await github.rest.issues.create({
+                      //   owner: context.repo.owner,
+                      //   repo: context.repo.repo,
+                      //   title: notificationMessage,
+                      //   body: `构建失败详情: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+                      // });
 
-      - name: Cleanup
-        if: always()
-        run: |
-          # 清理临时文件
-          rm -f *.vsix
-          git remote remove upstream || true
+            - name: Cleanup
+              if: always()
+              run: |
+                  # 清理临时文件
+                  rm -f *.vsix
+                  git remote remove upstream || true
+                          			license.organizationId,
+                          			new Date(license.latestStartDate),
+                          			new Date(license.latestEndDate),
+                          			license.latestStatus === 'cancelled',
+                          			license.nextOptInDate ?? data.nextOptInDate,
+                          		);
+                          	}
+
+                          	if (effective == null || compareSubscriptionPlans(actual.id, effective.id) >= 0) {
+                          		effective = { ...actual };
+                          	}
+
+                          	let activeOrganization: Organization | undefined;
+                          	if (organizationId != null) {
+                          		activeOrganization = organizations.find(organization => organization.id === organizationId);
+                          	} else if (effective?.organizationId != null) {
+                          		activeOrganization = organizations.find(organization => organization.id === effective.organizationId);
+                          	} else if (organizationsWithNoLicense.length > 0) {
+                          		activeOrganization = organizationsWithNoLicense[0];
+                          	}
+
+                          	return {
+                          		plan: {
+                          			actual: actual,
+                          			effective: effective,
+                          		},
+                          		account: account,
+                          		activeOrganization: activeOrganization,
+                          	};
+                          }
+                          function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {
+                          	return 'enterprise'; // 始终返回enterprise
+                          }
+                          function isBundleLicenseType(licenseType: GKLicenseType): boolean {
+                          	switch (licenseType) {
+                          		case 'bundle-pro':
+                          		case 'bundle-advanced':
+                          		case 'bundle-teams':
+                          		case 'bundle-hosted-enterprise':
+                          		case 'bundle-self-hosted-enterprise':
+                          		case 'bundle-standalone-enterprise':
+                          			return true;
+                          		default:
+                          			return false;
+                          	}
+                          }
+                          function licenseStatusPriority(status: GKLicense['latestStatus']): number {
+                          	switch (status) {
+                          		case 'active':
+                          			return 100;
+                          		case 'expired':
+                          		case 'cancelled':
+                          			return -100;
+                          		case 'in_trial':
+                          		case 'trial':
+                          			return 1;
+                          		case 'canceled':
+                          		case 'non_renewing':
+                          			return 0;
+                          		default:
+                          			return -200;
+                          	}
+                          }
+                          EOF
+
+                          # 修改subscriptionService.ts，确保本地存储功能将账户订阅计划存储为enterprise类型
+                          cat > src/plus/gk/utils/subscription.utils.ts << 'EOF'
+                          import { SubscriptionState } from '../../../constants.subscription';
+                          import { getTimeRemaining } from '../../../system/date';
+                          import type {
+                          	PaidSubscriptionPlanIds,
+                          	Subscription,
+                          	SubscriptionPlan,
+                          	SubscriptionPlanIds,
+                          	SubscriptionStateString,
+                          } from '../models/subscription';
+
+                          const orderedPlans: SubscriptionPlanIds[] = [
+                          	'community',
+                          	'community-with-account',
+                          	'student',
+                          	'pro',
+                          	'advanced',
+                          	'teams',
+                          	'enterprise',
+                          ];
+                          const orderedPaidPlans: PaidSubscriptionPlanIds[] = ['student', 'pro', 'advanced', 'teams', 'enterprise'];
+                          export const SubscriptionUpdatedUriPathPrefix = 'did-update-subscription';
+                          export const AiAllAccessOptInPathPrefix = 'ai-all-access-opt-in';
+
+                          export function compareSubscriptionPlans(
+                          	planA: SubscriptionPlanIds | undefined,
+                          	planB: SubscriptionPlanIds | undefined,
+                          ): number {
+                          	return getSubscriptionPlanOrder(planA) - getSubscriptionPlanOrder(planB);
+                          }
+
+                          export function computeSubscriptionState(subscription: Optional<Subscription, 'state'>): SubscriptionState {
+                          	return SubscriptionState.Paid; // 所有订阅均视为付费订阅，强制返回Paid状态
+                          }
+
+                          export function getSubscriptionNextPaidPlanId(subscription: Optional<Subscription, 'state'>): PaidSubscriptionPlanIds {
+                          	return 'enterprise'; // 始终返回enterprise
+                          }
+
+                          export function getSubscriptionPlan(
+                          	id: SubscriptionPlanIds,
+                          	bundle: boolean,
+                          	trialReactivationCount: number,
+                          	organizationId: string | undefined,
+                          	startedOn?: Date,
+                          	expiresOn?: Date,
+                          	cancelled: boolean = false,
+                          	nextTrialOptInDate?: string,
+                          ): SubscriptionPlan {
+                          	return {
+                          		id: 'enterprise', // 始终返回enterprise
+                          		name: getSubscriptionProductPlanName('enterprise'),
+                          		bundle: bundle,
+                          		cancelled: cancelled,
+                          		organizationId: organizationId,
+                          		trialReactivationCount: trialReactivationCount,
+                          		nextTrialOptInDate: nextTrialOptInDate,
+                          		startedOn: (startedOn ?? new Date()).toISOString(),
+                          		expiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,
+                          	};
+                          }
+
+                          /** Gets the plan name for the given plan id */
+                          export function getSubscriptionPlanName(
+                          	id: SubscriptionPlanIds,
+                          ): 'Community' | 'Student' | 'Pro' | 'Advanced' | 'Business' | 'Enterprise' {
+                          	return 'Enterprise'; // 始终返回Enterprise
+                          }
+
+                          export function getSubscriptionPlanOrder(id: SubscriptionPlanIds | undefined): number {
+                          	return id != null ? orderedPlans.indexOf(id) : -1;
+                          }
+
+                          /** Only for gk.dev `planType` query param */
+                          export function getSubscriptionPlanType(
+                          	id: SubscriptionPlanIds,
+                          ): 'STUDENT' | 'PRO' | 'ADVANCED' | 'BUSINESS' | 'ENTERPRISE' {
+                          	return 'ENTERPRISE'; // 始终返回ENTERPRISE
+                          }
+
+                          /** Gets the "product" (fully qualified) plan name for the given plan id */
+                          export function getSubscriptionProductPlanName(id: SubscriptionPlanIds): string {
+                          	return `GitLens \${getSubscriptionPlanName(id)}`;
+                          }
+
+                          /** Gets the "product" (fully qualified) plan name for the given subscription state */
+                          export function getSubscriptionProductPlanNameFromState(
+                          	state: SubscriptionState,
+                          	planId?: SubscriptionPlanIds,
+                          	effectivePlanId?: SubscriptionPlanIds,
+                          ): string {
+                          	switch (state) {
+                          		case SubscriptionState.Community:
+                          		case SubscriptionState.Trial:
+                          			return `${effectivePlanId === 'student' ? getSubscriptionProductPlanName('student') : getSubscriptionProductPlanName('pro')} Trial`;
+                          		case SubscriptionState.TrialExpired:
+                          			return getSubscriptionProductPlanName('community-with-account');
+                          		case SubscriptionState.TrialReactivationEligible:
+                          			return getSubscriptionProductPlanName('community-with-account');
+                          		case SubscriptionState.VerificationRequired:
+                          			return `${getSubscriptionProductPlanName(planId ?? 'pro')} (Unverified)`;
+                          		default:
+                          			return getSubscriptionProductPlanName(planId ?? 'pro');
+                          	}
+                          }
+
+                          export function getSubscriptionStateString(state: SubscriptionState | undefined): SubscriptionStateString {
+                          	switch (state) {
+                          		case SubscriptionState.VerificationRequired:
+                          			return 'verification';
+                          		case SubscriptionState.Community:
+                          			return 'free';
+                          		case SubscriptionState.Trial:
+                          			return 'trial';
+                          		case SubscriptionState.TrialExpired:
+                          			return 'trial-expired';
+                          		case SubscriptionState.TrialReactivationEligible:
+                          			return 'trial-reactivation-eligible';
+                          		case SubscriptionState.Paid:
+                          			return 'paid';
+                          		default:
+                          			return 'unknown';
+                          	}
+                          }
+
+                          export function getSubscriptionTimeRemaining(
+                          	subscription: Optional<Subscription, 'state'>,
+                          	unit?: 'days' | 'hours' | 'minutes' | 'seconds',
+                          ): number | undefined {
+                          	return getTimeRemaining(subscription.plan.effective.expiresOn, unit);
+                          }
+
+                          export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>): boolean {
+                          	return true; // 所有计划均视为付费计划，允许访问所有PRO级别功能
+                          }
+
+                          export function isSubscriptionPaidPlan(id: SubscriptionPlanIds): id is PaidSubscriptionPlanIds {
+                          	return true; // 所有计划均视为付费计划，允许访问所有PRO级别功能
+                          }
+
+                          export function isSubscriptionExpired(subscription: Optional<Subscription, 'state'>): boolean {
+                          	const remaining = getSubscriptionTimeRemaining(subscription);
+                          	return remaining != null && remaining <= 0;
+                          }
+
+                          export function isSubscriptionTrial(subscription: Optional<Subscription, 'state'>): boolean {
+                          	if (subscription.state != null) {
+                          		return subscription.state === SubscriptionState.Trial;
+                          	}
+
+                          	return subscription.plan.actual.id !== subscription.plan.effective.id;
+                          }
+
+                          export function isSubscriptionTrialOrPaidFromState(state: SubscriptionState | undefined): boolean {
+                          	return state != null ? state === SubscriptionState.Trial || state === SubscriptionState.Paid : false;
+                          }
+
+                          export function assertSubscriptionState(
+                          	subscription: Optional<Subscription, 'state'>,
+                          ): asserts subscription is Subscription {}
+
+                          export function getCommunitySubscription(subscription?: Subscription): Subscription {
+                          	return {
+                          		...subscription,
+                          		plan: {
+                          			actual: getSubscriptionPlan(
+                          				'community',
+                          				false,
+                          				0,
+                          				undefined,
+                          				subscription?.plan?.actual?.startedOn != null
+                          					? new Date(subscription.plan.actual.startedOn)
+                          					: undefined,
+                          			),
+                          			effective: getSubscriptionPlan(
+                          				'community',
+                          				false,
+                          				0,
+                          				undefined,
+                          				subscription?.plan?.actual?.startedOn != null
+                          					? new Date(subscription.plan.actual.startedOn)
+                          					: undefined,
+                          			),
+                          		},
+                          		account: undefined,
+                          		activeOrganization: undefined,
+                          		state: SubscriptionState.Community,
+                          	};
+                          }
+                          EOF
+
+                          # 修改subscriptionService.ts，确保本地存储功能将账户订阅计划存储为enterprise类型
+                          sed -i 's/subscription.state = computeSubscriptionState(subscription);/subscription.state = computeSubscriptionState(subscription);\n\t\t\t\t\t// 确保订阅计划始终为enterprise类型\n\t\t\t\t\tsubscription.plan.actual.id = "enterprise";\n\t\t\t\t\tsubscription.plan.effective.id = "enterprise";\n\t\t\t\t\tsubscription.plan.actual.name = "GitLens Enterprise";\n\t\t\t\t\tsubscription.plan.effective.name = "GitLens Enterprise";/' src/plus/gk/subscriptionService.ts
+
+                          echo "Subscription plan detection logic optimized successfully"
+                          echo "All plans are now treated as paid plans and return 'enterprise' type"
+                          echo "Function access permission check mechanism updated to allow access to all PRO level features"
+                          echo "Local storage functionality added to store account subscription plan as 'enterprise' type"
+
+                    # 5. 代码推送（仅在有实际修改时执行）
+                    - name: Configure git user
+                      run: |
+                          git config user.name "GitHub Actions"
+                          git config user.email "actions@github.com"
+
+                    - name: Check for changes
+                      id: check-changes
+                      run: |
+                          if git diff --exit-code; then
+                            echo "no_changes=true" >> $GITHUB_OUTPUT
+                            echo "No changes detected, skipping commit and push"
+                          else
+                            echo "no_changes=false" >> $GITHUB_OUTPUT
+                            echo "Changes detected, will commit and push"
+                          fi
+
+                    - name: Commit changes
+                      if: steps.check-changes.outputs.no_changes == 'false'
+                      run: |
+                          git add .
+                          git commit -m "Unlock all PRO features and set default plan to enterprise"
+
+                    - name: Push changes
+                      if: steps.check-changes.outputs.no_changes == 'false'
+                      run: git push origin ${{ github.ref_name }}
+
+                    # 6. 构建与发布
+                    - name: Build VSIX package
+                      run: pnpm run package
+
+                    - name: Get VSIX file path
+                      id: get-vsix
+                      run: |
+                          VSIX_FILE=$(find . -name "*.vsix" -type f | head -1)
+                          echo "vsix_file=$VSIX_FILE" >> $GITHUB_OUTPUT
+                          echo "vsix_filename=$(basename $VSIX_FILE)" >> $GITHUB_OUTPUT
+
+                    - name: Get build timestamp
+                      id: get-timestamp
+                      run: |
+                          # 获取当前时间并格式化为YYYY-MM-DD HH:mm:ss
+                          BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
+                          echo "build_timestamp=$BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
+                          echo "Build timestamp: $BUILD_TIMESTAMP"
+
+                    - name: Create Release
+                      id: create-release
+                      uses: actions/create-release@v1
+                      env:
+                          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                      with:
+                          tag_name: v${{ steps.get-current-version.outputs.current_version }}
+                          release_name: GitLens PRO v${{ steps.get-current-version.outputs.current_version }}
+                          body: |
+                              ## GitLens PRO 自动化构建发布
+
+                              ### 发布信息
+                              - 构建编号: ${{ github.run_number }}
+                              - 构建时间: ${{ steps.get-timestamp.outputs.build_timestamp }}
+                              - 上游分支: ${{ github.event.inputs.upstream_branch || 'main' }}
+                              - 版本变更: ${{ steps.get-latest-release.outputs.latest_version }} → ${{ steps.get-current-version.outputs.current_version }}
+
+                              ### 功能变更
+                              - 解锁所有PRO功能
+                              - 设置默认订阅计划为enterprise
+                              - 同步上游仓库最新代码
+
+                              ### 构建文件
+                              - VSIX包: ${{ steps.get-vsix.outputs.vsix_filename }}
+                          draft: false
+                          prerelease: false
+
+                    - name: Upload Release Asset
+                      uses: actions/upload-release-asset@v1
+                      env:
+                          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                      with:
+                          upload_url: ${{ steps.create-release.outputs.upload_url }}
+                          asset_path: ${{ steps.get-vsix.outputs.vsix_file }}
+                          asset_name: ${{ steps.get-vsix.outputs.vsix_filename }}
+                          asset_content_type: application/vsix
+
+                    # 7. 错误处理与通知
+                    - name: Send notification on failure
+                      if: failure()
+                      uses: actions/github-script@v7
+                      with:
+                          script: |
+                              const notificationMessage = `GitLens PRO构建失败: ${context.workflow} #${context.runNumber}`;
+                              console.log(notificationMessage);
+
+                              // 可以添加Slack、Discord或Email通知
+                              // 示例：发送到GitHub Issues
+                              // await github.rest.issues.create({
+                              //   owner: context.repo.owner,
+                              //   repo: context.repo.repo,
+                              //   title: notificationMessage,
+                              //   body: `构建失败详情: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+                              // });
+
+                    - name: Cleanup
+                      if: always()
+                      run: |
+                          # 清理临时文件
+                          rm -f *.vsix
+
+                  	}
+
+                  	if (actual == null) {
+                  		actual = getSubscriptionPlan(
+                  			'community-with-account',
+                  			false,
+                  			0,
+                  			undefined,
+                  			data.user.firstGitLensCheckIn != null
+                  				? new Date(data.user.firstGitLensCheckIn)
+                  				: data.user.createdDate != null
+                  					? new Date(data.user.createdDate)
+                  					: undefined,
+                  			undefined,
+                  			undefined,
+                  			data.nextOptInDate,
+                  		);
+                  	}
+
+                  	let effective: Subscription['plan']['effective'] | undefined;
+                  	const chosenEffectiveLicense =
+                  		organizationId != null
+                  			? (effectiveLicensesByOrganizationId.get(organizationId) ?? bestEffectiveLicense)
+                  			: bestEffectiveLicense;
+                  	if (chosenEffectiveLicense != null) {
+                  		const [licenseType, license] = chosenEffectiveLicense;
+                  		effective = getSubscriptionPlan(
+                  			convertLicenseTypeToPlanId(licenseType),
+                  			isBundleLicenseType(licenseType),
+                  			license.reactivationCount ?? 0,
+                  			license.organizationId,
+                  			new Date(license.latestStartDate),
+                  			new Date(license.latestEndDate),
+                  			license.latestStatus === 'cancelled',
+                  			license.nextOptInDate ?? data.nextOptInDate,
+                  		);
+                  	}
+
+                  	if (effective == null || compareSubscriptionPlans(actual.id, effective.id) >= 0) {
+                  		effective = { ...actual };
+                  	}
+
+                  	let activeOrganization: Organization | undefined;
+                  	if (organizationId != null) {
+                  		activeOrganization = organizations.find(organization => organization.id === organizationId);
+                  	} else if (effective?.organizationId != null) {
+                  		activeOrganization = organizations.find(organization => organization.id === effective.organizationId);
+                  	} else if (organizationsWithNoLicense.length > 0) {
+                  		activeOrganization = organizationsWithNoLicense[0];
+                  	}
+
+                  	return {
+                  		plan: {
+                  			actual: actual,
+                  			effective: effective,
+                  		},
+                  		account: account,
+                  		activeOrganization: activeOrganization,
+                  	};
+                  }
+                  function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {
+                  	return 'enterprise'; // 始终返回enterprise
+                  }
+                  function isBundleLicenseType(licenseType: GKLicenseType): boolean {
+                  	switch (licenseType) {
+                  		case 'bundle-pro':
+                  		case 'bundle-advanced':
+                  		case 'bundle-teams':
+                  		case 'bundle-hosted-enterprise':
+                  		case 'bundle-self-hosted-enterprise':
+                  		case 'bundle-standalone-enterprise':
+                  			return true;
+                  		default:
+                  			return false;
+                  	}
+                  }
+                  function licenseStatusPriority(status: GKLicense['latestStatus']): number {
+                  	switch (status) {
+                  		case 'active':
+                  			return 100;
+                  		case 'expired':
+                  		case 'cancelled':
+                  			return -100;
+                  		case 'in_trial':
+                  		case 'trial':
+                  			return 1;
+                  		case 'canceled':
+                  		case 'non_renewing':
+                  			return 0;
+                  		default:
+                  			return -200;
+                  	}
+                  }
+                  EOF
+
+                  # 修改subscriptionService.ts，确保本地存储功能将账户订阅计划存储为enterprise类型
+                  cat > src/plus/gk/utils/subscription.utils.ts << 'EOF'
+                  import { SubscriptionState } from '../../../constants.subscription';
+                  import { getTimeRemaining } from '../../../system/date';
+                  import type {
+                  	PaidSubscriptionPlanIds,
+                  	Subscription,
+                  	SubscriptionPlan,
+                  	SubscriptionPlanIds,
+                  	SubscriptionStateString,
+                  } from '../models/subscription';
+
+                  const orderedPlans: SubscriptionPlanIds[] = [
+                  	'community',
+                  	'community-with-account',
+                  	'student',
+                  	'pro',
+                  	'advanced',
+                  	'teams',
+                  	'enterprise',
+                  ];
+                  const orderedPaidPlans: PaidSubscriptionPlanIds[] = ['student', 'pro', 'advanced', 'teams', 'enterprise'];
+                  export const SubscriptionUpdatedUriPathPrefix = 'did-update-subscription';
+                  export const AiAllAccessOptInPathPrefix = 'ai-all-access-opt-in';
+
+                  export function compareSubscriptionPlans(
+                  	planA: SubscriptionPlanIds | undefined,
+                  	planB: SubscriptionPlanIds | undefined,
+                  ): number {
+                  	return getSubscriptionPlanOrder(planA) - getSubscriptionPlanOrder(planB);
+                  }
+
+                  export function computeSubscriptionState(subscription: Optional<Subscription, 'state'>): SubscriptionState {
+                  	return SubscriptionState.Paid; // 所有订阅均视为付费订阅，强制返回Paid状态
+                  }
+
+                  export function getSubscriptionNextPaidPlanId(subscription: Optional<Subscription, 'state'>): PaidSubscriptionPlanIds {
+                  	return 'enterprise'; // 始终返回enterprise
+                  }
+
+                  export function getSubscriptionPlan(
+                  	id: SubscriptionPlanIds,
+                  	bundle: boolean,
+                  	trialReactivationCount: number,
+                  	organizationId: string | undefined,
+                  	startedOn?: Date,
+                  	expiresOn?: Date,
+                  	cancelled: boolean = false,
+                  	nextTrialOptInDate?: string,
+                  ): SubscriptionPlan {
+                  	return {
+                  		id: 'enterprise', // 始终返回enterprise
+                  		name: getSubscriptionProductPlanName('enterprise'),
+                  		bundle: bundle,
+                  		cancelled: cancelled,
+                  		organizationId: organizationId,
+                  		trialReactivationCount: trialReactivationCount,
+                  		nextTrialOptInDate: nextTrialOptInDate,
+                  		startedOn: (startedOn ?? new Date()).toISOString(),
+                  		expiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,
+                  	};
+                  }
+
+                  /** Gets the plan name for the given plan id */
+                  export function getSubscriptionPlanName(
+                  	id: SubscriptionPlanIds,
+                  ): 'Community' | 'Student' | 'Pro' | 'Advanced' | 'Business' | 'Enterprise' {
+                  	return 'Enterprise'; // 始终返回Enterprise
+                  }
+
+                  export function getSubscriptionPlanOrder(id: SubscriptionPlanIds | undefined): number {
+                  	return id != null ? orderedPlans.indexOf(id) : -1;
+                  }
+
+                  /** Only for gk.dev `planType` query param */
+                  export function getSubscriptionPlanType(
+                  	id: SubscriptionPlanIds,
+                  ): 'STUDENT' | 'PRO' | 'ADVANCED' | 'BUSINESS' | 'ENTERPRISE' {
+                  	return 'ENTERPRISE'; // 始终返回ENTERPRISE
+                  }
+
+                  /** Gets the "product" (fully qualified) plan name for the given plan id */
+                  export function getSubscriptionProductPlanName(id: SubscriptionPlanIds): string {
+                  	return `GitLens \${getSubscriptionPlanName(id)}`;
+                  }
+
+                  /** Gets the "product" (fully qualified) plan name for the given subscription state */
+                  export function getSubscriptionProductPlanNameFromState(
+                  	state: SubscriptionState,
+                  	planId?: SubscriptionPlanIds,
+                  	effectivePlanId?: SubscriptionPlanIds,
+                  ): string {
+                  	switch (state) {
+                  		case SubscriptionState.Community:
+                  		case SubscriptionState.Trial:
+                  			return `${effectivePlanId === 'student' ? getSubscriptionProductPlanName('student') : getSubscriptionProductPlanName('pro')} Trial`;
+                  		case SubscriptionState.TrialExpired:
+                  			return getSubscriptionProductPlanName('community-with-account');
+                  		case SubscriptionState.TrialReactivationEligible:
+                  			return getSubscriptionProductPlanName('community-with-account');
+                  		case SubscriptionState.VerificationRequired:
+                  			return `${getSubscriptionProductPlanName(planId ?? 'pro')} (Unverified)`;
+                  		default:
+                  			return getSubscriptionProductPlanName(planId ?? 'pro');
+                  	}
+                  }
+
+                  export function getSubscriptionStateString(state: SubscriptionState | undefined): SubscriptionStateString {
+                  	switch (state) {
+                  		case SubscriptionState.VerificationRequired:
+                  			return 'verification';
+                  		case SubscriptionState.Community:
+                  			return 'free';
+                  		case SubscriptionState.Trial:
+                  			return 'trial';
+                  		case SubscriptionState.TrialExpired:
+                  			return 'trial-expired';
+                  		case SubscriptionState.TrialReactivationEligible:
+                  			return 'trial-reactivation-eligible';
+                  		case SubscriptionState.Paid:
+                  			return 'paid';
+                  		default:
+                  			return 'unknown';
+                  	}
+                  }
+
+                  export function getSubscriptionTimeRemaining(
+                  	subscription: Optional<Subscription, 'state'>,
+                  	unit?: 'days' | 'hours' | 'minutes' | 'seconds',
+                  ): number | undefined {
+                  	return getTimeRemaining(subscription.plan.effective.expiresOn, unit);
+                  }
+
+                  export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>): boolean {
+                  	return true; // 所有计划均视为付费计划，允许访问所有PRO级别功能
+                  }
+
+                  export function isSubscriptionPaidPlan(id: SubscriptionPlanIds): id is PaidSubscriptionPlanIds {
+                  	return true; // 所有计划均视为付费计划，允许访问所有PRO级别功能
+                  }
+
+                  export function isSubscriptionExpired(subscription: Optional<Subscription, 'state'>): boolean {
+                  	const remaining = getSubscriptionTimeRemaining(subscription);
+                  	return remaining != null && remaining <= 0;
+                  }
+
+                  export function isSubscriptionTrial(subscription: Optional<Subscription, 'state'>): boolean {
+                  	if (subscription.state != null) {
+                  		return subscription.state === SubscriptionState.Trial;
+                  	}
+
+                  	return subscription.plan.actual.id !== subscription.plan.effective.id;
+                  }
+
+                  export function isSubscriptionTrialOrPaidFromState(state: SubscriptionState | undefined): boolean {
+                  	return state != null ? state === SubscriptionState.Trial || state === SubscriptionState.Paid : false;
+                  }
+
+                  export function assertSubscriptionState(
+                  	subscription: Optional<Subscription, 'state'>,
+                  ): asserts subscription is Subscription {}
+
+                  export function getCommunitySubscription(subscription?: Subscription): Subscription {
+                  	return {
+                  		...subscription,
+                  		plan: {
+                  			actual: getSubscriptionPlan(
+                  				'community',
+                  				false,
+                  				0,
+                  				undefined,
+                  				subscription?.plan?.actual?.startedOn != null
+                  					? new Date(subscription.plan.actual.startedOn)
+                  					: undefined,
+                  			),
+                  			effective: getSubscriptionPlan(
+                  				'community',
+                  				false,
+                  				0,
+                  				undefined,
+                  				subscription?.plan?.actual?.startedOn != null
+                  					? new Date(subscription.plan.actual.startedOn)
+                  					: undefined,
+                  			),
+                  		},
+                  		account: undefined,
+                  		activeOrganization: undefined,
+                  		state: SubscriptionState.Community,
+                  	};
+                  }
+                  EOF
+
+                  # 修改subscriptionService.ts，确保本地存储功能将账户订阅计划存储为enterprise类型
+                  sed -i 's/subscription.state = computeSubscriptionState(subscription);/subscription.state = computeSubscriptionState(subscription);\n\t\t\t\t\t// 确保订阅计划始终为enterprise类型\n\t\t\t\t\tsubscription.plan.actual.id = "enterprise";\n\t\t\t\t\tsubscription.plan.effective.id = "enterprise";\n\t\t\t\t\tsubscription.plan.actual.name = "GitLens Enterprise";\n\t\t\t\t\tsubscription.plan.effective.name = "GitLens Enterprise";/' src/plus/gk/subscriptionService.ts
+
+                  echo "Subscription plan detection logic optimized successfully"
+                  echo "All plans are now treated as paid plans and return 'enterprise' type"
+                  echo "Function access permission check mechanism updated to allow access to all PRO level features"
+                  echo "Local storage functionality added to store account subscription plan as 'enterprise' type"
+
+            # 5. 代码推送（仅在有实际修改时执行）
+            - name: Configure git user
+              run: |
+                  git config user.name "GitHub Actions"
+                  git config user.email "actions@github.com"
+
+            - name: Check for changes
+              id: check-changes
+              run: |
+                  if git diff --exit-code; then
+                    echo "no_changes=true" >> $GITHUB_OUTPUT
+                    echo "No changes detected, skipping commit and push"
+                  else
+                    echo "no_changes=false" >> $GITHUB_OUTPUT
+                    echo "Changes detected, will commit and push"
+                  fi
+
+            - name: Commit changes
+              if: steps.check-changes.outputs.no_changes == 'false'
+              run: |
+                  git add .
+                  git commit -m "Unlock all PRO features and set default plan to enterprise"
+
+            - name: Push changes
+              if: steps.check-changes.outputs.no_changes == 'false'
+              run: git push origin ${{ github.ref_name }}
+
+            # 6. 构建与发布
+            - name: Build VSIX package
+              run: pnpm run package
+
+            - name: Get VSIX file path
+              id: get-vsix
+              run: |
+                  VSIX_FILE=$(find . -name "*.vsix" -type f | head -1)
+                  echo "vsix_file=$VSIX_FILE" >> $GITHUB_OUTPUT
+                  echo "vsix_filename=$(basename $VSIX_FILE)" >> $GITHUB_OUTPUT
+
+            - name: Get build timestamp
+              id: get-timestamp
+              run: |
+                  # 获取当前时间并格式化为YYYY-MM-DD HH:mm:ss
+                  BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
+                  echo "build_timestamp=$BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
+                  echo "Build timestamp: $BUILD_TIMESTAMP"
+
+            - name: Create Release
+              id: create-release
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: v${{ steps.get-current-version.outputs.current_version }}
+                  release_name: GitLens PRO v${{ steps.get-current-version.outputs.current_version }}
+                  body: |
+                      ## GitLens PRO 自动化构建发布
+
+                      ### 发布信息
+                      - 构建编号: ${{ github.run_number }}
+                      - 构建时间: ${{ steps.get-timestamp.outputs.build_timestamp }}
+                      - 上游分支: ${{ github.event.inputs.upstream_branch || 'main' }}
+                      - 版本变更: ${{ steps.get-latest-release.outputs.latest_version }} → ${{ steps.get-current-version.outputs.current_version }}
+
+                      ### 功能变更
+                      - 解锁所有PRO功能
+                      - 设置默认订阅计划为enterprise
+                      - 同步上游仓库最新代码
+
+                      ### 构建文件
+                      - VSIX包: ${{ steps.get-vsix.outputs.vsix_filename }}
+                  draft: false
+                  prerelease: false
+
+            - name: Upload Release Asset
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ steps.create-release.outputs.upload_url }}
+                  asset_path: ${{ steps.get-vsix.outputs.vsix_file }}
+                  asset_name: ${{ steps.get-vsix.outputs.vsix_filename }}
+                  asset_content_type: application/vsix
+
+            # 7. 错误处理与通知
+            - name: Send notification on failure
+              if: failure()
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const notificationMessage = `GitLens PRO构建失败: ${context.workflow} #${context.runNumber}`;
+                      console.log(notificationMessage);
+
+                      // 可以添加Slack、Discord或Email通知
+                      // 示例：发送到GitHub Issues
+                      // await github.rest.issues.create({
+                      //   owner: context.repo.owner,
+                      //   repo: context.repo.repo,
+                      //   title: notificationMessage,
+                      //   body: `构建失败详情: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+                      // });
+
+            - name: Cleanup
+              if: always()
+              run: |
+                  # 清理临时文件
+                  rm -f *.vsix
