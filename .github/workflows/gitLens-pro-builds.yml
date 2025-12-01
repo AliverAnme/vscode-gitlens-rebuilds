@@ -43,7 +43,7 @@ jobs:
             - name: Install pnpm
               uses: pnpm/action-setup@v4
               with:
-                  version-from-package: true
+                  # version-from-package: true
                   run_install: false
 
             - name: Set up Node.js
@@ -151,7 +151,7 @@ jobs:
                     "patch-008:checkin.utils.convertLicenseTypeToPlanId:src/plus/gk/utils/checkin.utils.ts:function:convertLicenseTypeToPlanId:function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {\n\treturn 'enterprise'; // 始终返回enterprise\n}"
 
                     # patch-009: 修改subscriptionService.changeSubscription中的状态计算逻辑，确保订阅计划始终为enterprise
-                    "patch-009:subscriptionService.changeSubscription:src/plus/gk/subscriptionService.ts:pattern:subscription.state = computeSubscriptionState;\n\t\t\tassertSubscriptionState:subscription.state = computeSubscriptionState(subscription);\n\t\t\t// 确保订阅计划始终为enterprise类型\n\t\t\tsubscription.plan.actual.id = 'enterprise';\n\t\t\tsubscription.plan.effective.id = 'enterprise';\n\t\t\tsubscription.plan.actual.name = 'GitLens Enterprise';\n\t\t\tsubscription.plan.effective.name = 'GitLens Enterprise';\n\t\t\tassertSubscriptionState(subscription);"
+                    "patch-009:subscriptionService.changeSubscription:src/plus/gk/subscriptionService.ts:pattern:subscription.state = computeSubscriptionState(subscription);\n	assertSubscriptionState(subscription):subscription.state = computeSubscriptionState(subscription);\n	// 确保订阅计划始终为enterprise类型\n	subscription.plan.actual.id = 'enterprise';\n	subscription.plan.effective.id = 'enterprise';\n	subscription.plan.actual.name = 'GitLens Enterprise';\n	subscription.plan.effective.name = 'GitLens Enterprise';\n	assertSubscriptionState(subscription);"
                   )
 
                   # 初始化补丁结果统计
@@ -192,11 +192,31 @@ jobs:
                         pattern="$match_pattern"
                         echo "Applying pattern-based patch for: $pattern"
 
-                        # 使用sed替换匹配的代码段
-                        # 转义特殊字符
-                        escaped_pattern=$(echo "$pattern" | sed 's/[\/&]/\\&/g')
-                        escaped_content=$(echo "$patch_content" | sed 's/[\/&]/\\&/g')
-                        sed -i "s/$escaped_pattern/$escaped_content/g" "$file_path"
+                        # 使用awk进行多行匹配和替换
+                        # 将匹配模式和替换内容写入临时文件
+                        echo "$pattern" > match_pattern.tmp
+                        echo "$patch_content" > patch_content.tmp
+
+                        # 使用awk进行多行替换
+                        awk '{
+                          # 读取整个文件到buffer
+                          buffer = buffer $0 "\n"
+                        } END {
+                          # 读取匹配模式和替换内容
+                          getline match < "match_pattern.tmp"
+                          getline patch < "patch_content.tmp"
+                          # 读取剩余的替换内容（处理多行）
+                          while (getline line < "patch_content.tmp") {
+                            patch = patch "\n" line
+                          }
+                          # 替换匹配的内容
+                          gsub(match, patch, buffer)
+                          # 输出结果
+                          print buffer
+                        }' "$file_path" > "$file_path.tmp"
+
+                        # 替换原文件
+                        mv "$file_path.tmp" "$file_path"
                         ;;
                       *)
                         echo "❌ ERROR: Unknown match type: $match_type"
@@ -206,8 +226,20 @@ jobs:
                         ;;
                     esac
 
-                    # 验证补丁是否成功应用 - 检查关键注释或代码模式
-                    if grep -q "// 所有订阅均视为付费订阅" "$file_path" || grep -q "// 始终返回enterprise" "$file_path" || grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
+                    # 针对patch-009的特殊验证
+                    if [ "$patch_id" = "patch-009" ]; then
+                      # 检查特定的注释是否存在
+                      if grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
+                        echo "✅ SUCCESS: Patch $patch_id applied successfully"
+                        successful_patches=$((successful_patches+1))
+                        jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "success" --arg result "Patch applied successfully" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
+                      else
+                        echo "❌ ERROR: Patch $patch_id verification failed"
+                        failed_patches=$((failed_patches+1))
+                        jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Verification failed" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
+                      fi
+                    # 其他补丁的验证
+                    elif grep -q "// 所有订阅均视为付费订阅" "$file_path" || grep -q "// 始终返回enterprise" "$file_path" || grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
                       echo "✅ SUCCESS: Patch $patch_id applied successfully"
                       successful_patches=$((successful_patches+1))
                       jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "success" --arg result "Patch applied successfully" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
