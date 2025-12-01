@@ -31,13 +31,15 @@ jobs:
         timeout-minutes: 60
 
         steps:
-            # 1. 环境准备
-            - name: Checkout repository
+            # 1. 环境准备 - 直接同步指定仓库的特定分支
+            - name: Checkout upstream repository
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
                   token: ${{ secrets.GITHUB_TOKEN }}
-                  
+                  repository: gitkraken/vscode-gitlens
+                  ref: ${{ github.event.inputs.upstream_branch || 'main' }}
+
             - name: Install pnpm
               uses: pnpm/action-setup@v4
               with:
@@ -50,8 +52,6 @@ jobs:
                   node-version: '22.x'
                   cache: 'pnpm'
                   cache-dependency-path: '**/pnpm-lock.yaml'
-
-
 
             - name: Install dependencies
               run: pnpm install
@@ -112,18 +112,6 @@ jobs:
                   echo "::error::Workflow stopped because version ${{ steps.get-current-version.outputs.current_version }} is already released."
                   echo "::notice::Use a different version number or delete the existing release to proceed."
                   exit 1
-
-            # 3. 代码同步
-            - name: Add upstream remote
-              run: git remote add upstream https://github.com/gitkraken/vscode-gitlens.git
-
-            - name: Fetch upstream changes
-              run: git fetch upstream --all --tags
-
-            - name: Merge upstream changes
-              run: |
-                  git checkout ${{ github.ref_name }}
-                  git merge upstream/${{ github.event.inputs.upstream_branch || 'main' }} --allow-unrelated-histories -m "Merge upstream changes"
 
             # 4. 代码修改 - 解锁PRO功能
             - name: Initialize patch report
