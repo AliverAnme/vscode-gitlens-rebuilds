@@ -196,41 +196,60 @@ jobs:
                       "function")
                         # 使用函数名匹配，替换整个函数
                         function_name="$match_pattern"
-                        echo "Applying function-based patch for: $function_name"
+                        echo "=== Applying function-based patch for: $function_name ==="
 
-                        # 采用更可靠的先删除后添加策略，避免函数重复定义
-                        if grep -q "^export function $function_name\|^function $function_name" "$file_path"; then
-                          echo "Found existing function, will remove and replace..."
+                        # 添加调试信息：显示替换前文件中所有匹配函数的位置
+                        echo "Before removal - all occurrences of $function_name:"
+                        grep -n "export function $function_name\|function $function_name" "$file_path"
 
-                          # 方法1：使用grep + sed组合删除函数
-                          # 先找到函数定义的行号
-                          func_start=$(grep -n "^export function $function_name\|^function $function_name" "$file_path" | head -1 | cut -d: -f1)
+                        # 采用更可靠的方法：使用awk删除所有匹配的函数定义
+                        # 创建临时文件，只保留非目标函数的内容
+                        awk -v func="$function_name" '
+                        BEGIN {
+                          in_func = 0;
+                          brace_count = 0;
+                        }
+                        {
+                          # 检查是否是目标函数的开始
+                          if ($0 ~ "^export function " func "\s*\(|^function " func "\s*\(") {
+                            in_func = 1;
+                            # 计算当前行的大括号数量
+                            brace_count = gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
+                          } else if (in_func) {
+                            # 在目标函数内部，计算大括号数量
+                            brace_count += gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
+                            # 当大括号数量为0时，函数结束
+                            if (brace_count <= 0) {
+                              in_func = 0;
+                            }
+                          } else {
+                            # 不是目标函数，正常输出
+                            print;
+                          }
+                        }
+                        ' "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
 
-                          if [ -n "$func_start" ]; then
-                            # 找到下一个函数定义的行号
-                            next_func=$(grep -n "^export function \|^function " "$file_path" | grep -A1 "^$func_start:" | tail -1 | cut -d: -f1)
-
-                            if [ -n "$next_func" ] && [ "$next_func" -gt "$func_start" ]; then
-                              # 有下一个函数，删除从func_start到next_func-1的行
-                              sed -i "$func_start,$((next_func-1))d" "$file_path"
-                            else
-                              # 没有下一个函数，删除从func_start到文件末尾的行
-                              sed -i "$func_start,\$d" "$file_path"
-                            fi
-                          fi
-                        fi
+                        # 添加调试信息：显示替换后文件中是否还有匹配函数
+                        echo "After removal - remaining occurrences of $function_name:"
+                        grep -n "export function $function_name\|function $function_name" "$file_path" || echo "No occurrences found"
 
                         # 现在添加新的函数到文件末尾
+                        echo "Adding new $function_name function..."
                         echo -e "\n$patch_content" >> "$file_path"
+
+                        # 添加调试信息：显示添加后文件中匹配函数的位置
+                        echo "After addition - occurrences of $function_name:"
+                        grep -n "export function $function_name\|function $function_name" "$file_path"
                         ;;
                       "pattern")
                         # 使用唯一模式匹配，替换特定代码段
                         pattern="$match_pattern"
-                        echo "Applying pattern-based patch for: $pattern"
+                        echo "=== Applying pattern-based patch for: $pattern ==="
 
                         # 使用更可靠的替换方式，避免重复替换
                         # 先检查是否已经存在替换后的内容，避免重复添加
                         if ! grep -q "subscription.plan.actual.id = 'enterprise'" "$file_path"; then
+                          echo "Adding enterprise plan assignment..."
                           # 将 enterprise 赋值行插入到 computeSubscriptionState(...) 之后（如果存在匹配）
                           awk '
                           { print }
@@ -241,6 +260,8 @@ jobs:
                             print "\tsubscription.plan.effective.name = '\''GitLens Enterprise'\'';"
                           }
                           ' "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
+                        else
+                          echo "Enterprise plan assignment already exists, skipping..."
                         fi
                         ;;
                       *)
