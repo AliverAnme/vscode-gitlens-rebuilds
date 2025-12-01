@@ -151,7 +151,7 @@ jobs:
                     "patch-008:checkin.utils.convertLicenseTypeToPlanId:src/plus/gk/utils/checkin.utils.ts:function:convertLicenseTypeToPlanId:function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {\n\treturn 'enterprise'; // 始终返回enterprise\n}"
 
                     # patch-009: 修改subscriptionService.changeSubscription中的状态计算逻辑，确保订阅计划始终为enterprise
-                    "patch-009:subscriptionService.changeSubscription:src/plus/gk/subscriptionService.ts:pattern:\tsubscription.state = computeSubscriptionState(subscription);\n\tassertSubscriptionState(subscription):\tsubscription.state = computeSubscriptionState(subscription);\n\t\t// 确保订阅计划始终为enterprise类型\n\t\tsubscription.plan.actual.id = 'enterprise';\n\t\tsubscription.plan.effective.id = 'enterprise';\n\t\tsubscription.plan.actual.name = 'GitLens Enterprise';\n\t\tsubscription.plan.effective.name = 'GitLens Enterprise';\n\tassertSubscriptionState(subscription);"
+                    "patch-009:subscriptionService.changeSubscription:src/plus/gk/subscriptionService.ts:pattern:\tsubscription.state = computeSubscriptionState(subscription);\n\tassertSubscriptionState(subscription):\tsubscription.state = computeSubscriptionState(subscription);\n\t// 确保订阅计划始终为enterprise类型\n\tsubscription.plan.actual.id = 'enterprise';\n\tsubscription.plan.effective.id = 'enterprise';\n\tsubscription.plan.actual.name = 'GitLens Enterprise';\n\tsubscription.plan.effective.name = 'GitLens Enterprise';\n\tassertSubscriptionState(subscription);"
                   )
 
                   # 初始化补丁结果统计
