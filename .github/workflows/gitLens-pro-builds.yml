@@ -203,14 +203,14 @@ jobs:
                           buffer = buffer $0 "\n"
                         } END {
                           # 读取匹配模式和替换内容
-                          getline match < "match_pattern.tmp"
+                          getline pattern_str < "match_pattern.tmp"
                           getline patch < "patch_content.tmp"
                           # 读取剩余的替换内容（处理多行）
                           while (getline line < "patch_content.tmp") {
                             patch = patch "\n" line
                           }
                           # 替换匹配的内容
-                          gsub(match, patch, buffer)
+                          gsub(pattern_str, patch, buffer)
                           # 输出结果
                           print buffer
                         }' "$file_path" > "$file_path.tmp"
