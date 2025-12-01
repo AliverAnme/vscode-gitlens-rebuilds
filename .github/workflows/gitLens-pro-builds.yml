@@ -196,10 +196,20 @@ jobs:
                         printf "%b" "$pattern" > match_pattern.tmp
                         printf "%b" "$patch_content" > patch_content.tmp
 
-                        # 使用单行 Python 命令进行替换（避免 heredoc/缩进导致的 YAML/语法问题）
-                        python3 -c "import sys; from pathlib import Path; fp=Path(sys.argv[1]); p=Path('match_pattern.tmp').read_text(encoding='utf-8'); patch=Path('patch_content.tmp').read_text(encoding='utf-8'); content=fp.read_text(encoding='utf-8'); fp.write_text(content.replace(p,patch) if p in content else content, encoding='utf-8')" "$file_path"
+                        # 将 enterprise 赋值行插入到 computeSubscriptionState(...) 之后（如果存在匹配）
+                        # 采用 awk 插入以避免复杂的多重引号/缩进问题
+                        awk '
+                        { print }
+                        /subscription\.state = computeSubscriptionState\(subscription\);/ {
+                          print "\tsubscription.plan.actual.id = '\''enterprise'\'';"
+                          print "\tsubscription.plan.effective.id = '\''enterprise'\'';"
+                          print "\tsubscription.plan.actual.name = '\''GitLens Enterprise'\'';"
+                          print "\tsubscription.plan.effective.name = '\''GitLens Enterprise'\'';"
+                        }
+                        ' "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
                         ;;
                       *)
+
                         echo "❌ ERROR: Unknown match type: $match_type"
                         failed_patches=$((failed_patches+1))
                         jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Unknown match type" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
@@ -209,8 +219,8 @@ jobs:
 
                     # 针对patch-009的特殊验证
                     if [ "$patch_id" = "patch-009" ]; then
-                      # 检查特定的注释是否存在
-                      if grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
+                      # 验证是否存在 enterprise 赋值语句或名称（更可靠的验证）
+                      if grep -q "subscription.plan.actual.id = 'enterprise'" "$file_path" || grep -q "subscription.plan.actual.name = 'GitLens Enterprise'" "$file_path"; then
                         echo "✅ SUCCESS: Patch $patch_id applied successfully"
                         successful_patches=$((successful_patches+1))
                         jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "success" --arg result "Patch applied successfully" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
@@ -220,7 +230,7 @@ jobs:
                         jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "failed" --arg result "Verification failed" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
                       fi
                     # 其他补丁的验证
-                    elif grep -q "// 所有订阅均视为付费订阅" "$file_path" || grep -q "// 始终返回enterprise" "$file_path" || grep -q "// 确保订阅计划始终为enterprise类型" "$file_path"; then
+                    elif grep -q "// 所有订阅均视为付费订阅" "$file_path" || grep -q "// 始终返回enterprise" "$file_path" || grep -q "// 确保订阅计划始终为enterprise类型" "$file_path" || grep -q "subscription.plan.actual.id = 'enterprise'" "$file_path" || grep -q "subscription.plan.actual.name = 'GitLens Enterprise'" "$file_path"; then
                       echo "✅ SUCCESS: Patch $patch_id applied successfully"
                       successful_patches=$((successful_patches+1))
                       jq --arg id "$patch_id" --arg name "$patch_name" --arg file "$file_path" --arg status "success" --arg result "Patch applied successfully" --arg match_type "$match_type" --arg match_pattern "$match_pattern" '.patches += [{"id":$id,"name":$name,"file":$file,"status":$status,"result":$result,"match_type":$match_type,"match_pattern":$match_pattern}]' patch-report.json > temp.json && mv temp.json patch-report.json
