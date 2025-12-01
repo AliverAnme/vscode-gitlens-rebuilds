@@ -38,18 +38,18 @@ jobs:
                   fetch-depth: 0
                   token: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Install pnpm
-              uses: pnpm/action-setup@v4
-              with:
-                  version: latest
-                  run_install: false
-
             - name: Set up Node.js
               uses: actions/setup-node@v4
               with:
                   node-version: '22.x'
                   cache: 'pnpm'
                   cache-dependency-path: '**/pnpm-lock.yaml'
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: latest
+                  run_install: false
 
             - name: Install dependencies
               run: pnpm install
@@ -265,32 +265,38 @@ jobs:
             - name: Generate patch processing report
               id: generate-report
               run: |
-                  # 生成人类可读的补丁报告
-                  echo "# GitLens PRO Patch Processing Report" > patch-report.md
-                  echo "" >> patch-report.md
-                  echo "## Summary" >> patch-report.md
-                  echo "- Total patches: ${{ steps.apply-patches.outputs.total_patches }}" >> patch-report.md
-                  echo "- Successful: ${{ steps.apply-patches.outputs.successful_patches }}" >> patch-report.md
-                  echo "- Failed: ${{ steps.apply-patches.outputs.failed_patches }}" >> patch-report.md
-                  echo "" >> patch-report.md
+                # 生成人类可读的补丁报告
+                echo "# GitLens PRO Patch Processing Report" > patch-report.md
+                echo "" >> patch-report.md
+                echo "## Summary" >> patch-report.md
+                echo "- Total patches: ${{ steps.apply-patches.outputs.total_patches }}" >> patch-report.md
+                echo "- Successful: ${{ steps.apply-patches.outputs.successful_patches }}" >> patch-report.md
+                echo "- Failed: ${{ steps.apply-patches.outputs.failed_patches }}" >> patch-report.md
+                echo "" >> patch-report.md
 
-                  echo "## Patch Details" >> patch-report.md
-                  echo "" >> patch-report.md
+                echo "## Patch Details" >> patch-report.md
+                echo "" >> patch-report.md
 
-                  # 从JSON报告中提取补丁详情
-                  jq -r '.patches[] | "### Patch \(.id) - \(.name)\n- File: \(.file)\n- Match Type: \(.match_type)\n- Match Pattern: \(.match_pattern)\n- Status: **\(.status | ascii_upcase)**\n- Result: \(.result)\n"' patch-report.json >> patch-report.md
+                # 从JSON报告中提取补丁详情
+                jq -r '.patches[] | "### Patch \(.id) - \(.name)\n- File: \(.file)\n- Match Type: \(.match_type)\n- Match Pattern: \(.match_pattern)\n- Purpose: \(.purpose // "N/A")\n- Status: **\(.status | ascii_upcase)**\n- Result: \(.result)\n"' patch-report.json >> patch-report.md
 
-                  echo "" >> patch-report.md
-                  echo "## Conclusion" >> patch-report.md
-                  if [ "${{ steps.apply-patches.outputs.successful_patches }}" -eq "${{ steps.apply-patches.outputs.total_patches }}" ]; then
-                    echo "✅ All PRO feature unlocking patches applied successfully!" >> patch-report.md
-                    echo "GitLens PRO features have been fully unlocked." >> patch-report.md
-                  else
-                    echo "❌ Some patches failed to apply. Please review the details above." >> patch-report.md
-                  fi
+                echo "" >> patch-report.md
+                echo "## Conclusion" >> patch-report.md
+                if [ "${{ steps.apply-patches.outputs.successful_patches }}" -eq "${{ steps.apply-patches.outputs.total_patches }}" ]; then
+                  echo "✅ All PRO feature unlocking patches applied successfully!" >> patch-report.md
+                  echo "GitLens PRO features have been fully unlocked." >> patch-report.md
+                else
+                  echo "❌ Some patches failed to apply. Please review the details above." >> patch-report.md
+                fi
 
-                  echo "\n=== Patch Report Generated ==="
-                  cat patch-report.md
+                echo "" >> patch-report.md
+                echo "## Patch Application Log" >> patch-report.md
+                echo "```json" >> patch-report.md
+                cat patch-report.json | jq . >> patch-report.md
+                echo "```" >> patch-report.md
+
+                echo "\n=== Patch Report Generated ==="
+                cat patch-report.md
 
             - name: Display patch report summary
               run: |
