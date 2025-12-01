@@ -198,44 +198,30 @@ jobs:
                         function_name="$match_pattern"
                         echo "Applying function-based patch for: $function_name"
 
-                        # 使用更可靠的awk方法来替换整个函数，避免sed的嵌套函数问题
-                        awk -v func="$function_name" -v new_func="$patch_content" '
-                        BEGIN {
-                          in_function = 0;
-                          brace_count = 0;
-                          found = 0;
-                        }
-                        {
-                          if (!in_function) {
-                            # 匹配函数定义开始
-                            if ($0 ~ "^export function " func "\s*\(|^function " func "\s*\(") {
-                              in_function = 1;
-                              found = 1;
-                              # 输出新的函数内容
-                              printf "%s\n", new_func;
-                              # 计算当前行的大括号数量
-                              brace_count = gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
-                            } else {
-                              # 不是目标函数，正常输出
-                              print;
-                            }
-                          } else {
-                            # 在函数内部，计算大括号数量
-                            brace_count += gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
-                            # 当大括号数量为0时，函数结束
-                            if (brace_count <= 0) {
-                              in_function = 0;
-                            }
-                            # 跳过原函数内容
-                          }
-                        }
-                        END {
-                          # 如果函数不存在，添加到文件末尾
-                          if (!found) {
-                            print "\n" new_func;
-                          }
-                        }
-                        ' "$file_path" > "$file_path.tmp" && mv "$file_path.tmp" "$file_path"
+                        # 采用更可靠的先删除后添加策略，避免函数重复定义
+                        if grep -q "^export function $function_name\|^function $function_name" "$file_path"; then
+                          echo "Found existing function, will remove and replace..."
+
+                          # 方法1：使用grep + sed组合删除函数
+                          # 先找到函数定义的行号
+                          func_start=$(grep -n "^export function $function_name\|^function $function_name" "$file_path" | head -1 | cut -d: -f1)
+
+                          if [ -n "$func_start" ]; then
+                            # 找到下一个函数定义的行号
+                            next_func=$(grep -n "^export function \|^function " "$file_path" | grep -A1 "^$func_start:" | tail -1 | cut -d: -f1)
+
+                            if [ -n "$next_func" ] && [ "$next_func" -gt "$func_start" ]; then
+                              # 有下一个函数，删除从func_start到next_func-1的行
+                              sed -i "$func_start,$((next_func-1))d" "$file_path"
+                            else
+                              # 没有下一个函数，删除从func_start到文件末尾的行
+                              sed -i "$func_start,\$d" "$file_path"
+                            fi
+                          fi
+                        fi
+
+                        # 现在添加新的函数到文件末尾
+                        echo -e "\n$patch_content" >> "$file_path"
                         ;;
                       "pattern")
                         # 使用唯一模式匹配，替换特定代码段
