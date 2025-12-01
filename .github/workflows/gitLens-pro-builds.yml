@@ -196,22 +196,8 @@ jobs:
                         printf "%b" "$pattern" > match_pattern.tmp
                         printf "%b" "$patch_content" > patch_content.tmp
 
-                        # 使用 Python 做字面多行替换（更可靠，保留原文件编码）
-                        python3 "$file_path" <<'PY'
-                        import sys
-                        from pathlib import Path
-
-                        file_path = Path(sys.argv[1])
-                        pattern = Path('match_pattern.tmp').read_text(encoding='utf-8')
-                        patch = Path('patch_content.tmp').read_text(encoding='utf-8')
-                        content = file_path.read_text(encoding='utf-8')
-                        if pattern in content:
-                            content = content.replace(pattern, patch)
-                            file_path.write_text(content, encoding='utf-8')
-                        else:
-                            # 如果未找到匹配，仍写回原内容以触发后续验证失败
-                            file_path.write_text(content, encoding='utf-8')
-                        PY
+                        # 使用单行 Python 命令进行替换（避免 heredoc/缩进导致的 YAML/语法问题）
+                        python3 -c "import sys; from pathlib import Path; fp=Path(sys.argv[1]); p=Path('match_pattern.tmp').read_text(encoding='utf-8'); patch=Path('patch_content.tmp').read_text(encoding='utf-8'); content=fp.read_text(encoding='utf-8'); fp.write_text(content.replace(p,patch) if p in content else content, encoding='utf-8')" "$file_path"
                         ;;
                       *)
                         echo "❌ ERROR: Unknown match type: $match_type"
