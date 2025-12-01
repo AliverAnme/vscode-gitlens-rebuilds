@@ -204,14 +204,15 @@ jobs:
 
                         # 采用更可靠的方法：使用awk删除所有匹配的函数定义
                         # 创建临时文件，只保留非目标函数的内容
-                        awk -v func="$function_name" '
+                        # 修复：将func变量名改为target_func避免与gawk内置关键字冲突
+                        awk -v target_func="$function_name" '
                         BEGIN {
                           in_func = 0;
                           brace_count = 0;
                         }
                         {
                           # 检查是否是目标函数的开始
-                          if ($0 ~ "^export function " func "\s*\(|^function " func "\s*\(") {
+                          if ($0 ~ "^export function " target_func "\s*\(|^function " target_func "\s*\(") {
                             in_func = 1;
                             # 计算当前行的大括号数量
                             brace_count = gsub(/\{/, "", $0) - gsub(/\}/, "", $0);
