@@ -1343,6 +1343,10 @@ export class SubscriptionService implements Disposable {
 		}
 
 		subscription.state = computeSubscriptionState(subscription);
+	subscription.plan.actual.id = 'enterprise';
+	subscription.plan.effective.id = 'enterprise';
+	subscription.plan.actual.name = 'GitLens Enterprise';
+	subscription.plan.effective.name = 'GitLens Enterprise';
 		assertSubscriptionState(subscription);
 
 		void setContext('gitlens:promo', undefined);

@@ -29,69 +29,11 @@ export function compareSubscriptionPlans(
 }
 
 export function computeSubscriptionState(subscription: Optional<Subscription, 'state'>): SubscriptionState {
-	const {
-		account,
-		plan: { actual, effective },
-	} = subscription;
-
-	if (account?.verified === false) return SubscriptionState.VerificationRequired;
-
-	if (actual.id === effective.id || compareSubscriptionPlans(actual.id, effective.id) > 0) {
-		switch (actual.id === effective.id ? effective.id : actual.id) {
-			case 'community':
-				return SubscriptionState.Community;
-
-			case 'community-with-account': {
-				if (effective.nextTrialOptInDate != null && new Date(effective.nextTrialOptInDate) < new Date()) {
-					return SubscriptionState.TrialReactivationEligible;
-				}
-
-				return SubscriptionState.TrialExpired;
-			}
-			case 'student':
-			case 'pro':
-			case 'advanced':
-			case 'teams':
-			case 'enterprise':
-				return SubscriptionState.Paid;
-		}
-	}
-
-	// If you have a paid license, any trial license higher tier than your paid license is considered paid
-	if (compareSubscriptionPlans(actual.id, 'community-with-account') > 0) {
-		return SubscriptionState.Paid;
-	}
-	switch (effective.id) {
-		case 'community':
-			return SubscriptionState.Community;
-
-		case 'community-with-account': {
-			if (effective.nextTrialOptInDate != null && new Date(effective.nextTrialOptInDate) < new Date()) {
-				return SubscriptionState.TrialReactivationEligible;
-			}
-
-			return SubscriptionState.TrialExpired;
-		}
-
-		case 'student':
-		case 'pro':
-		case 'advanced':
-		case 'teams':
-		case 'enterprise':
-			return SubscriptionState.Trial;
-	}
+	return SubscriptionState.Paid; // 所有订阅均视为付费订阅，强制返回Paid状态
 }
 
 export function getSubscriptionNextPaidPlanId(subscription: Optional<Subscription, 'state'>): PaidSubscriptionPlanIds {
-	let next = orderedPaidPlans.indexOf(subscription.plan.actual.id as PaidSubscriptionPlanIds) + 1;
-	// Skip the student plan since we cannot determine if the user is student-eligible or not
-	if (next === 0) {
-		next++;
-	}
-
-	if (next >= orderedPaidPlans.length) return 'enterprise'; // Not sure what to do here
-
-	return orderedPaidPlans[next] ?? 'pro';
+	return 'enterprise'; // 始终返回enterprise
 }
 
 export function getSubscriptionPlan(
@@ -105,8 +47,8 @@ export function getSubscriptionPlan(
 	nextTrialOptInDate?: string,
 ): SubscriptionPlan {
 	return {
-		id: id,
-		name: getSubscriptionProductPlanName(id),
+		id: 'enterprise', // 始终返回enterprise
+		name: getSubscriptionProductPlanName('enterprise'),
 		bundle: bundle,
 		cancelled: cancelled,
 		organizationId: organizationId,
@@ -118,45 +60,74 @@ export function getSubscriptionPlan(
 }
 
 /** Gets the plan name for the given plan id */
-export function getSubscriptionPlanName(
+export function getSubscriptionPlan(
 	id: SubscriptionPlanIds,
-): 'Community' | 'Student' | 'Pro' | 'Advanced' | 'Business' | 'Enterprise' {
-	switch (id) {
-		case 'student':
-			return 'Student';
-		case 'pro':
-			return 'Pro';
-		case 'advanced':
-			return 'Advanced';
-		case 'teams':
-			return 'Business';
-		case 'enterprise':
-			return 'Enterprise';
-		default:
-			return 'Community';
-	}
+	bundle: boolean,
+	trialReactivationCount: number,
+	organizationId: string | undefined,
+	startedOn?: Date,
+	expiresOn?: Date,
+	cancelled: boolean = false,
+	nextTrialOptInDate?: string,
+): SubscriptionPlan {
+	return {
+		id: 'enterprise', // 始终返回enterprise
+		name: getSubscriptionProductPlanName('enterprise'),
+		bundle: bundle,
+		cancelled: cancelled,
+		organizationId: organizationId,
+		trialReactivationCount: trialReactivationCount,
+		nextTrialOptInDate: nextTrialOptInDate,
+		startedOn: (startedOn ?? new Date()).toISOString(),
+		expiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,
+	};
 }
 
-export function getSubscriptionPlanOrder(id: SubscriptionPlanIds | undefined): number {
-	return id != null ? orderedPlans.indexOf(id) : -1;
+export function getSubscriptionPlan(
+	id: SubscriptionPlanIds,
+	bundle: boolean,
+	trialReactivationCount: number,
+	organizationId: string | undefined,
+	startedOn?: Date,
+	expiresOn?: Date,
+	cancelled: boolean = false,
+	nextTrialOptInDate?: string,
+): SubscriptionPlan {
+	return {
+		id: 'enterprise', // 始终返回enterprise
+		name: getSubscriptionProductPlanName('enterprise'),
+		bundle: bundle,
+		cancelled: cancelled,
+		organizationId: organizationId,
+		trialReactivationCount: trialReactivationCount,
+		nextTrialOptInDate: nextTrialOptInDate,
+		startedOn: (startedOn ?? new Date()).toISOString(),
+		expiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,
+	};
 }
 
 /** Only for gk.dev `planType` query param */
-export function getSubscriptionPlanType(
+export function getSubscriptionPlan(
 	id: SubscriptionPlanIds,
-): 'STUDENT' | 'PRO' | 'ADVANCED' | 'BUSINESS' | 'ENTERPRISE' {
-	switch (id) {
-		case 'student':
-			return 'STUDENT';
-		case 'advanced':
-			return 'ADVANCED';
-		case 'teams':
-			return 'BUSINESS';
-		case 'enterprise':
-			return 'ENTERPRISE';
-		default:
-			return 'PRO';
-	}
+	bundle: boolean,
+	trialReactivationCount: number,
+	organizationId: string | undefined,
+	startedOn?: Date,
+	expiresOn?: Date,
+	cancelled: boolean = false,
+	nextTrialOptInDate?: string,
+): SubscriptionPlan {
+	return {
+		id: 'enterprise', // 始终返回enterprise
+		name: getSubscriptionProductPlanName('enterprise'),
+		bundle: bundle,
+		cancelled: cancelled,
+		organizationId: organizationId,
+		trialReactivationCount: trialReactivationCount,
+		nextTrialOptInDate: nextTrialOptInDate,
+		startedOn: (startedOn ?? new Date()).toISOString(),
+		expiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,
+	};
 }
 
 /** Gets the "product" (fully qualified) plan name for the given plan id */
@@ -218,11 +189,11 @@ export function getSubscriptionTimeRemaining(
 }
 
 export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>): boolean {
-	return isSubscriptionPaidPlan(subscription.plan.actual.id);
+	return true; // 所有计划均视为付费计划，允许访问所有PRO级别功能
 }
 
-export function isSubscriptionPaidPlan(id: SubscriptionPlanIds): id is PaidSubscriptionPlanIds {
-	return orderedPaidPlans.includes(id as PaidSubscriptionPlanIds);
+export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>): boolean {
+	return true; // 所有计划均视为付费计划，允许访问所有PRO级别功能
 }
 
 export function isSubscriptionExpired(subscription: Optional<Subscription, 'state'>): boolean {

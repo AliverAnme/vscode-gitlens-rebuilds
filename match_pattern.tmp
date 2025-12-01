@@ -1,0 +1,2 @@
+	subscription.state = computeSubscriptionState(subscription);
+	assertSubscriptionState(subscription)

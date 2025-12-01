@@ -1,0 +1,7 @@
+	subscription.state = computeSubscriptionState(subscription);
+	// 确保订阅计划始终为enterprise类型
+	subscription.plan.actual.id = 'enterprise';
+	subscription.plan.effective.id = 'enterprise';
+	subscription.plan.actual.name = 'GitLens Enterprise';
+	subscription.plan.effective.name = 'GitLens Enterprise';
+	assertSubscriptionState(subscription);

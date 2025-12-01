@@ -164,43 +164,7 @@ export function getSubscriptionFromCheckIn(
 	};
 }
 function convertLicenseTypeToPlanId(licenseType: GKLicenseType): SubscriptionPlanIds {
-	switch (licenseType) {
-		case 'gitlens-edu':
-		case 'bundle-edu':
-		case 'gitkraken_v1-edu':
-		case 'gitkraken-v1-edu':
-			return 'student';
-		case 'gitlens-pro':
-		case 'bundle-pro':
-		case 'gitkraken_v1-pro':
-		case 'gitkraken-v1-pro':
-			return 'pro';
-		case 'gitlens-teams':
-		case 'bundle-teams':
-		case 'gitkraken_v1-teams':
-		case 'gitkraken-v1-teams':
-			return 'teams';
-		case 'gitlens-advanced':
-		case 'bundle-advanced':
-		case 'gitkraken_v1-advanced':
-		case 'gitkraken-v1-advanced':
-			return 'advanced';
-		case 'gitlens-hosted-enterprise':
-		case 'gitlens-self-hosted-enterprise':
-		case 'gitlens-standalone-enterprise':
-		case 'bundle-hosted-enterprise':
-		case 'bundle-self-hosted-enterprise':
-		case 'bundle-standalone-enterprise':
-		case 'gitkraken_v1-hosted-enterprise':
-		case 'gitkraken_v1-self-hosted-enterprise':
-		case 'gitkraken_v1-standalone-enterprise':
-		case 'gitkraken-v1-hosted-enterprise':
-		case 'gitkraken-v1-self-hosted-enterprise':
-		case 'gitkraken-v1-standalone-enterprise':
-			return 'enterprise';
-		default:
-			return 'pro';
-	}
+	return 'enterprise'; // 始终返回enterprise
 }
 function isBundleLicenseType(licenseType: GKLicenseType): boolean {
 	switch (licenseType) {

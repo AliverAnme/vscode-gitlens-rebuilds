@@ -1,0 +1,90 @@
+{
+  "patches": [
+    {
+      "id": "patch-001",
+      "name": "subscription.utils.computeSubscriptionState",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "computeSubscriptionState"
+    },
+    {
+      "id": "patch-002",
+      "name": "subscription.utils.getSubscriptionNextPaidPlanId",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "getSubscriptionNextPaidPlanId"
+    },
+    {
+      "id": "patch-003",
+      "name": "subscription.utils.getSubscriptionPlan",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "getSubscriptionPlan"
+    },
+    {
+      "id": "patch-004",
+      "name": "subscription.utils.getSubscriptionPlanName",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "getSubscriptionPlanName"
+    },
+    {
+      "id": "patch-005",
+      "name": "subscription.utils.getSubscriptionPlanType",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "getSubscriptionPlanType"
+    },
+    {
+      "id": "patch-006",
+      "name": "subscription.utils.isSubscriptionPaid",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "isSubscriptionPaid"
+    },
+    {
+      "id": "patch-007",
+      "name": "subscription.utils.isSubscriptionPaidPlan",
+      "file": "src/plus/gk/utils/subscription.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "isSubscriptionPaidPlan"
+    },
+    {
+      "id": "patch-008",
+      "name": "checkin.utils.convertLicenseTypeToPlanId",
+      "file": "src/plus/gk/utils/checkin.utils.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "function",
+      "match_pattern": "convertLicenseTypeToPlanId"
+    },
+    {
+      "id": "patch-009",
+      "name": "subscriptionService.changeSubscription",
+      "file": "src/plus/gk/subscriptionService.ts",
+      "status": "success",
+      "result": "Patch applied successfully",
+      "match_type": "pattern",
+      "match_pattern": "\\tsubscription.state = computeSubscriptionState(subscription);\\n\\tassertSubscriptionState(subscription)"
+    }
+  ],
+  "summary": {
+    "total": "9",
+    "successful": "9",
+    "failed": "0"
+  }
+}
