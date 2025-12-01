@@ -4,9 +4,13 @@ on:
     # 手动触发
     workflow_dispatch:
         inputs:
+            upstream_repository:
+                description: '上游仓库'
+                required: false
+                default: 'gitkraken/vscode-gitlens'
             upstream_branch:
                 description: '上游仓库分支'
-                required: true
+                required: false
                 default: 'main'
             release_version:
                 description: '发布版本号（可选）'
@@ -31,14 +35,24 @@ jobs:
         timeout-minutes: 60
 
         steps:
-            # 1. 环境准备 - 直接同步指定仓库的特定分支
-            - name: Checkout upstream repository
+            # 1. 环境准备 - 首先检出运行工作流的仓库，然后同步上游仓库代码
+            - name: Checkout running workflow repository
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
                   token: ${{ secrets.GITHUB_TOKEN }}
-                  repository: gitkraken/vscode-gitlens
-                  ref: ${{ github.event.inputs.upstream_branch || 'main' }}
+                  ref: ${{ github.ref_name }}
+
+            - name: Add upstream repository as remote
+              run: |
+                  UPSTREAM_REPO=${{ github.event.inputs.upstream_repository || 'gitkraken/vscode-gitlens' }}
+                  git remote add upstream https://github.com/${UPSTREAM_REPO}.git
+                  git fetch upstream
+
+            - name: Pull latest code from upstream branch
+              run: |
+                  UPSTREAM_BRANCH=${{ github.event.inputs.upstream_branch || 'main' }}
+                  git pull upstream $UPSTREAM_BRANCH --allow-unrelated-histories
 
             - name: Install pnpm
               uses: pnpm/action-setup@v4
@@ -381,6 +395,7 @@ jobs:
                       ### 发布信息
                       - 构建编号: ${{ github.run_number }}
                       - 构建时间: ${{ steps.get-timestamp.outputs.build_timestamp }}
+                      - 上游仓库: ${{ github.event.inputs.upstream_repository || 'gitkraken/vscode-gitlens' }}
                       - 上游分支: ${{ github.event.inputs.upstream_branch || 'main' }}
                       - 版本变更: ${{ steps.get-latest-release.outputs.latest_version }} → ${{ steps.get-current-version.outputs.current_version }}
 
